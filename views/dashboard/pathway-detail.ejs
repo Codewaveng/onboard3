@@ -90,7 +90,12 @@ function gcalLink(item) {
  + '&details=' + encodeURIComponent(item.body||'')
  + '&location=' + encodeURIComponent(item.venue||'');
 }
-const totalContent = updates.length + resources.length + opportunities.length;
+function isEndedListing(item) {
+ return ['opportunity','event'].includes(item.section) && (
+  item.isEnded || (item.section === 'event' && (item.endsAt || item.scheduledAt) && new Date(item.endsAt || item.scheduledAt) <= new Date())
+ );
+}
+const totalContent = updates.length + resources.length + opportunities.length + endedListings.length;
 const sectionLabel = { class:'Class', event:'Event', update:'Update', resource:'Resource', opportunity:'Opportunity' };
 %>
 
@@ -232,6 +237,9 @@ const sectionLabel = { class:'Class', event:'Event', update:'Update', resource:'
  <i class="fas fa-arrow-right"></i> Join Now
  </a>
  <% } %>
+ <% if (isLead && ['opportunity','event'].includes(item.section) && (user.isAdmin || item.createdBy?.toString() === user._id?.toString())) { %>
+ <button type="button" onclick="leadEndItem('<%=item._id%>')" class="pd-btn pd-btn-ghost pd-btn-sm">Mark ended</button>
+ <% } %>
  </div>
  </div>
  <% }) %>
@@ -280,6 +288,9 @@ const sectionLabel = { class:'Class', event:'Event', update:'Update', resource:'
  <a href="<%=item.externalUrl%>" target="_blank" class="pd-btn pd-btn-primary pd-btn-sm">
  <i class="fas fa-link"></i> Link
  </a>
+ <% } %>
+ <% if (isLead && item.section === 'event' && (user.isAdmin || item.createdBy?.toString() === user._id?.toString())) { %>
+ <button type="button" onclick="leadEndItem('<%=item._id%>')" class="pd-btn pd-btn-ghost pd-btn-sm">Mark ended</button>
  <% } %>
  <% const upCal = gcalLink(item); if (upCal) { %>
  <a href="<%=upCal%>" target="_blank" class="pd-btn pd-btn-ghost pd-btn-sm">
@@ -396,15 +407,19 @@ const sectionLabel = { class:'Class', event:'Event', update:'Update', resource:'
  <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.3rem">
  <p style="font-size:.975rem;font-weight:800;color:var(--text)"><%=item.title%></p>
  <span style="font-size:.62rem;font-weight:800;color:<%=otC%>;background:<%=otC%>18;border:1px solid <%=otC%>33;border-radius:99px;padding:.1rem .5rem;text-transform:capitalize"><%=otLbl%></span>
+ <% if (isEndedListing(item)) { %><span style="font-size:.62rem;font-weight:900;color:#f87171;background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.25);border-radius:99px;padding:.1rem .5rem;text-transform:uppercase">Ended</span><% } %>
  </div>
  <% if (item.body) { %>
  <p style="font-size:.8rem;color:var(--text-3);line-height:1.55;margin-bottom:.625rem"><%=item.body%></p>
  <% } %>
- <% if (item.externalUrl) { %>
+ <% if (item.externalUrl && !isEndedListing(item)) { %>
  <a href="<%=item.externalUrl%>" target="_blank" class="pd-btn pd-btn-sm"
  style="background:<%=otC%>18;border:1px solid <%=otC%>38;color:<%=otC%>">
  Apply <i class="fas fa-arrow-right" style="font-size:.6rem"></i>
  </a>
+ <% } %>
+ <% if (isLead && !isEndedListing(item) && (user.isAdmin || item.createdBy?.toString() === user._id?.toString())) { %>
+ <button type="button" onclick="leadEndItem('<%=item._id%>')" class="pd-btn pd-btn-ghost pd-btn-sm" style="margin-top:.5rem">Mark ended</button>
  <% } %>
  </div>
  </div>
@@ -418,8 +433,34 @@ const sectionLabel = { class:'Class', event:'Event', update:'Update', resource:'
 </div>
 <% } %>
 
+<!-- ENDED OPPORTUNITIES AND EVENTS -->
+<% if (endedListings.length) { %>
+<div class="pd-sec">
+ <div class="pd-sec-hd">
+ <span class="pd-sec-ico" style="background:rgba(248,113,113,.1);color:#f87171"><i class="fas fa-circle-check"></i></span>
+ <h2 class="pd-sec-title">Ended Opportunities &amp; Events</h2>
+ <span class="pd-sec-cnt" style="color:#f87171;background:rgba(248,113,113,.1)"><%=endedListings.length%></span>
+ </div>
+ <% endedListings.forEach(item => { %>
+ <div class="pd-upcoming-row" style="opacity:.78">
+  <div style="width:38px;height:38px;border-radius:11px;background:rgba(248,113,113,.1);color:#f87171;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+   <i class="fas <%=item.section === 'event' ? 'fa-calendar-xmark' : 'fa-briefcase'%>"></i>
+  </div>
+  <div style="flex:1;min-width:0">
+   <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+    <p style="font-size:.9rem;font-weight:800;color:var(--text)"><%=item.title%></p>
+    <span style="font-size:.62rem;font-weight:900;color:#f87171;background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.25);border-radius:99px;padding:.1rem .5rem;text-transform:uppercase">Ended</span>
+    <span style="font-size:.62rem;color:var(--text-3);text-transform:uppercase"><%=sectionLabel[item.section]%></span>
+   </div>
+   <% if (item.body) { %><p style="font-size:.75rem;color:var(--text-3);margin-top:.2rem"><%=item.body%></p><% } %>
+  </div>
+ </div>
+ <% }) %>
+</div>
+<% } %>
+
 <!-- EMPTY -->
-<% if (!totalContent && !liveItems.length && !upcoming.length) { %>
+<% if (!totalContent && !liveItems.length && !upcoming.length && !endedListings.length) { %>
 <div style="text-align:center;padding:5rem 2rem">
  <div style="width:70px;height:70px;border-radius:50%;background:<%=BG%>;border:1px solid <%=BR%>;display:flex;align-items:center;justify-content:center;margin:0 auto 1.125rem;box-shadow:0 0 30px <%=C%>22">
  <i class="fas <%=meta.icon%>" style="color:<%=C%>;font-size:1.625rem"></i>
@@ -466,6 +507,16 @@ function leadClose() {
  document.getElementById('lf-title').value = '';
  document.getElementById('lf-body').value = '';
  _leadSection = '';
+}
+
+async function leadEndItem(itemId) {
+ if (!confirm('Mark this opportunity or event as ended? It will be shown as ended and its action link will be disabled.')) return;
+ try {
+  const r = await fetch('/dashboard/career-paths/<%= pathway %>/end/' + encodeURIComponent(itemId), { method:'POST' });
+  const d = await r.json();
+  if (!d.success) { alert(d.message || 'Could not mark this item as ended.'); return; }
+  location.reload();
+ } catch (e) { alert('Could not update this item. Please try again.'); }
 }
 
 async function leadSubmit() {

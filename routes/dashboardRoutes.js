@@ -393,6 +393,30 @@ router.post('/career-paths/:pathway/post', isAuthenticated, async (req, res) => 
   } catch (err) { console.error('[lead-post]', err); res.json({ success: false, message: err.message }); }
 });
 
+router.post('/career-paths/:pathway/end/:id', isAuthenticated, async (req, res) => {
+  try {
+    const { pathway, id } = req.params;
+    const user = await User.findById(req.session.userId).select('pathwayLeadOf isAdmin').lean();
+    if (!user.pathwayLeadOf?.includes(pathway) && !user.isAdmin)
+      return res.status(403).json({ success: false, message: 'Not authorised' });
+
+    const PathwayContent = require('../models/PathwayContent');
+    const item = await PathwayContent.findOne({ _id: id, pathway });
+    if (!item || !['opportunity', 'event'].includes(item.section))
+      return res.status(404).json({ success: false, message: 'Opportunity or event not found' });
+    if (!user.isAdmin && item.createdBy?.toString() !== req.session.userId)
+      return res.status(403).json({ success: false, message: 'You can only end your own posts' });
+
+    item.isEnded = true;
+    item.isLive = false;
+    await item.save();
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[pathway-content-end]', err);
+    res.status(500).json({ success: false, message: 'Could not mark this item as ended' });
+  }
+});
+
 // ── Pathway Lead: delete own content ─────────────────────────────────────────
 router.post('/career-paths/:pathway/delete/:id', isAuthenticated, async (req, res) => {
   try {
@@ -448,19 +472,24 @@ router.get('/career-paths/:pathway', isAuthenticated, async (req, res) => {
     const isLead = !!(user.pathwayLeadOf?.includes(pathway) || user.isAdmin);
 
     const now = new Date();
-    const liveItems     = content.filter(c => c.isLive);
-    const upcoming      = content.filter(c => !c.isLive && c.scheduledAt && new Date(c.scheduledAt) > now)
+    const isEndedListing = (item) => ['opportunity', 'event'].includes(item.section) && (
+      item.isEnded || (item.section === 'event' && (item.endsAt || item.scheduledAt) && new Date(item.endsAt || item.scheduledAt) <= now)
+    );
+    const liveItems     = content.filter(c => c.isLive && !isEndedListing(c));
+    const upcoming      = content.filter(c => !c.isLive && !isEndedListing(c) && c.scheduledAt && new Date(c.scheduledAt) > now)
                                   .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
     const updates       = content.filter(c => c.section === 'update'      && !c.isLive);
     const resources     = content.filter(c => c.section === 'resource');
     const opportunities = content.filter(c => c.section === 'opportunity');
+    const endedListings = content.filter(isEndedListing)
+                                  .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
 
     res.render('dashboard/pathway-detail', {
       title: `${PATHWAY_META[pathway].name} — ONBOARD3`,
       user, pathway, meta: PATHWAY_META[pathway],
       config: config || {},
       lead, allLeads, isLead,
-      liveItems, upcoming, updates, resources, opportunities,
+      liveItems, upcoming, updates, resources, opportunities, endedListings,
       currentPage: 'career-paths', pathwaySlug: pathway
     });
   } catch (err) {

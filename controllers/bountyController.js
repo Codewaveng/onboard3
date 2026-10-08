@@ -13,7 +13,8 @@ const ZAD_HEADERS = () => ({ Authorization: `Bearer ${ZAD_KEY}`, 'Content-Type':
 let _priceCache   = {};
 let _priceCacheAt = 0;
 // Maps token symbol → CoinGecko ID (known tokens only)
-const GECKO_IDS = { STX: 'blockstack', BTC: 'bitcoin', sBTC: 'bitcoin', ETH: 'ethereum', LEO: 'leo-2' };
+const GECKO_IDS = { STX: 'blockstack', BTC: 'bitcoin', sBTC: 'bitcoin', ETH: 'ethereum' };
+const LEO_TENERO_TOKEN = 'https://api.tenero.io/v1/stacks/tokens/SP1AY6K3PQV5MRT6R4S671NWW2FRVPKM0BR162CT6.leo-token';
 const LEO_DIA_ASSET = 'https://api.diadata.org/v1/assetQuotation/Stacks/SP1AY6K3PQV5MRT6R4S671NWW2FRVPKM0BR162CT6.leo-token';
 // Stablecoins always $1
 const STABLES   = new Set(['USDC','USDT','DAI','BUSD','TUSD']);
@@ -35,12 +36,19 @@ async function getTokenPrices(symbols) {
       }
     } catch {}
   }
-  if (needsLeoPrice && !prices.LEO) {
+  if (needsLeoPrice) {
     try {
-      const leo = await axios.get(LEO_DIA_ASSET, { timeout: 6000 });
-      const leoUSD = Number(leo.data?.Price ?? leo.data?.price);
+      const leo = await axios.get(LEO_TENERO_TOKEN, { timeout: 6000 });
+      const leoUSD = Number(leo.data?.data?.price_usd);
       if (Number.isFinite(leoUSD) && leoUSD > 0) prices.LEO = leoUSD;
-    } catch { if (_priceCache.LEO) prices.LEO = _priceCache.LEO; }
+    } catch {}
+    if (!prices.LEO) {
+      try {
+        const leo = await axios.get(LEO_DIA_ASSET, { timeout: 6000 });
+        const leoUSD = Number(leo.data?.Price ?? leo.data?.price);
+        if (Number.isFinite(leoUSD) && leoUSD > 0) prices.LEO = leoUSD;
+      } catch { if (_priceCache.LEO) prices.LEO = _priceCache.LEO; }
+    }
   }
   _priceCache = { ..._priceCache, ...prices };
   _priceCacheAt = now;
@@ -56,6 +64,14 @@ function toUSD(amount, symbol, prices) {
   const usd = amount * price;
   if (usd >= 1000) return '$' + Math.round(usd).toLocaleString('en-US');
   return '$' + usd.toFixed(2);
+}
+
+function toUSDAmount(amount, symbol, prices) {
+  const quantity = Number(amount);
+  if (!Number.isFinite(quantity) || !symbol) return 0;
+  if (STABLES.has(normalizeTokenSymbol(symbol))) return quantity;
+  const price = Number(prices[normalizeTokenSymbol(symbol)]);
+  return Number.isFinite(price) && price > 0 ? quantity * price : 0;
 }
 
 // ── ZAD cache (5 min TTL) ─────────────────────────────────────────────────────
@@ -140,7 +156,11 @@ exports.listBounties = async (req, res) => {
     const zadPast = [...zadRawPast, ...zadRawLive.filter(isZADEnded)];
 
     // Fetch token prices for all symbols seen in ZAD bounties
-    const symbols  = [...new Set([...zadLive, ...zadPast].map(b => b.token?.symbol).filter(Boolean))];
+    const allZAD = [...zadLive, ...zadPast];
+    const symbols = [...new Set([
+      ...allZAD.map(b => b.token?.symbol),
+      ...allInternal.map(b => b.rewardToken || 'USDC')
+    ].filter(Boolean))];
     const prices   = await getTokenPrices(symbols);
 
     // Attach usdValue to each ZAD bounty
@@ -149,11 +169,18 @@ exports.listBounties = async (req, res) => {
       usdValue: toUSD(b.totalPayment, b.token?.symbol, prices)
     });
 
+    const totalBountyCount = allInternal.length + allZAD.length;
+    const totalBountyRewardUSD = allInternal.reduce((total, bounty) =>
+      total + toUSDAmount(bounty.rewardPool, bounty.rewardToken || 'USDC', prices), 0)
+      + allZAD.reduce((total, bounty) =>
+        total + toUSDAmount(bounty.totalPayment, bounty.token?.symbol, prices), 0);
+
     res.render('dashboard/bounty', {
       title: 'Bounties — ONBOARD3', user, currentPage: 'bounties',
       internalLive, internalEnded,
       zadLive: zadLive.map(enrichZAD),
-      zadPast: zadPast.map(enrichZAD)
+      zadPast: zadPast.map(enrichZAD),
+      totalBountyCount, totalBountyRewardUSD
     });
   } catch (err) {
     console.error('[Bounty] listBounties:', err);

@@ -55,6 +55,12 @@
  }
  @media (max-width: 600px) { .b-grid { grid-template-columns: 1fr; } }
 
+ .b-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; margin:0 0 1.25rem; }
+ .b-summary-card { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:1rem 1.1rem; }
+ .b-summary-label { color:var(--text-3); font-size:.7rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }
+ .b-summary-value { color:var(--text); font-size:1.35rem; font-weight:900; margin-top:.25rem; font-variant-numeric:tabular-nums; }
+ @media (max-width:480px) { .b-summary { grid-template-columns:1fr; } }
+
  .b-card {
  background: var(--bg-card);
  border: 1px solid var(--border);
@@ -141,6 +147,17 @@
  <i class="fas fa-coins" style="color:#fbbf24;margin-right:.4rem"></i>Bounties
  </h2>
  <p style="color:var(--text-3);font-size:.875rem">Complete bounties to earn rewards.</p>
+ </div>
+
+ <div class="b-summary">
+ <div class="b-summary-card">
+ <div class="b-summary-label">Total Bounties</div>
+ <div class="b-summary-value"><%= totalBountyCount.toLocaleString('en-US') %></div>
+ </div>
+ <div class="b-summary-card">
+ <div class="b-summary-label">Total Rewards (USDC equivalent)</div>
+ <div class="b-summary-value">$<%= totalBountyRewardUSD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></div>
+ </div>
  </div>
 
  <%

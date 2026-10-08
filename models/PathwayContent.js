@@ -9,6 +9,7 @@ const pathwayContentSchema = new mongoose.Schema({
     scheduledAt:     { type: Date,   default: null },
     endsAt:          { type: Date,   default: null },
     isLive:          { type: Boolean, default: false },
+    isEnded:         { type: Boolean, default: false },
     // Resource
     resourceUrl:     { type: String, default: null },
     resourceType:    { type: String, enum: ['pdf','link','video','doc', null], default: null },
