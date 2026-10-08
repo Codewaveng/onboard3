@@ -169,10 +169,10 @@ exports.listBounties = async (req, res) => {
       usdValue: toUSD(b.totalPayment, b.token?.symbol, prices)
     });
 
-    const totalBountyCount = allInternal.length + allZAD.length;
-    const totalBountyRewardUSD = allInternal.reduce((total, bounty) =>
+    const activeBountyCount = internalLive.length + zadLive.length;
+    const activeBountyRewardUSD = internalLive.reduce((total, bounty) =>
       total + toUSDAmount(bounty.rewardPool, bounty.rewardToken || 'USDC', prices), 0)
-      + allZAD.reduce((total, bounty) =>
+      + zadLive.reduce((total, bounty) =>
         total + toUSDAmount(bounty.totalPayment, bounty.token?.symbol, prices), 0);
 
     res.render('dashboard/bounty', {
@@ -180,7 +180,7 @@ exports.listBounties = async (req, res) => {
       internalLive, internalEnded,
       zadLive: zadLive.map(enrichZAD),
       zadPast: zadPast.map(enrichZAD),
-      totalBountyCount, totalBountyRewardUSD
+      activeBountyCount, activeBountyRewardUSD
     });
   } catch (err) {
     console.error('[Bounty] listBounties:', err);
