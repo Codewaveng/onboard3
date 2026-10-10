@@ -42,6 +42,7 @@
  <% }); %>
  </select>
  </div>
+ <div id="leaderboardNotice" role="status" style="display:none;margin:-.5rem 0 1rem;padding:.75rem 1rem;border-radius:9px;font-size:.82rem"></div>
 
  <!-- Leaderboard Table -->
  <div class="a-card">
@@ -79,7 +80,7 @@
 
  <div class="form-group">
  <label class="form-label">Username</label>
- <input type="text" class="form-input" id="username" name="username" required>
+ <input type="text" class="form-input" id="username" name="username" required minlength="3" maxlength="30" autocomplete="off">
  </div>
 
  <!-- Edit mode: current XP + add/deduct controls -->
@@ -98,7 +99,7 @@
 
  <div class="form-group" style="margin-bottom:.5rem">
  <label class="form-label" id="amountLabel">Amount to Add</label>
- <input type="number" class="form-input" id="points" name="points" min="0" required placeholder="Enter amount" style="font-size:1.1rem;font-weight:700;text-align:center">
+ <input type="number" class="form-input" id="points" name="points" min="0" step="1" required placeholder="Enter amount" style="font-size:1.1rem;font-weight:700;text-align:center">
  </div>
 
  <div id="previewRow" style="display:none;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:.625rem 1rem;margin-bottom:.875rem;text-align:center;font-size:.875rem;color:#8aaf85">
@@ -110,7 +111,7 @@
  <div id="addControls">
  <div class="form-group">
  <label class="form-label">Starting XP</label>
- <input type="number" class="form-input" id="pointsAdd" min="0" value="0">
+ <input type="number" class="form-input" id="pointsAdd" min="0" step="1" value="0">
  </div>
  </div>
 
@@ -124,6 +125,7 @@
  <button type="submit" class="a-btn a-btn-primary" style="width:100%" id="submitBtn">
  <i class="fas fa-save"></i> Save
  </button>
+ <div id="formFeedback" role="alert" style="display:none;margin-top:.75rem;text-align:center;font-size:.82rem"></div>
  </form>
  </div>
  </div>
@@ -297,16 +299,20 @@
  function openAddModal() {
  document.getElementById('modalTitle').textContent = 'Add User to Leaderboard';
  document.getElementById('userForm').reset();
+ document.getElementById('formFeedback').style.display = 'none';
  document.getElementById('userId').value = '';
  document.getElementById('leaderboardType').value = currentLeaderboard;
  document.getElementById('fakeUserCheckbox').style.display = 'block';
  document.getElementById('editControls').style.display = 'none';
+ document.getElementById('points').disabled = true;
+ document.getElementById('pointsAdd').disabled = false;
  document.getElementById('addControls').style.display = 'block';
  document.getElementById('userModal').classList.add('open');
  }
 
  function openEditModal(userId, username, points, isFakeUser) {
  _editCurrentXp = points || 0;
+ document.getElementById('formFeedback').style.display = 'none';
  document.getElementById('modalTitle').textContent = 'Adjust XP — @' + username;
  document.getElementById('userId').value = userId;
  document.getElementById('username').value = username;
@@ -316,6 +322,8 @@
  document.getElementById('leaderboardType').value = currentLeaderboard;
  document.getElementById('fakeUserCheckbox').style.display = 'none';
  document.getElementById('editControls').style.display = 'block';
+ document.getElementById('points').disabled = false;
+ document.getElementById('pointsAdd').disabled = true;
  document.getElementById('addControls').style.display = 'none';
  document.getElementById('currentXpDisplay').textContent = (points || 0).toLocaleString();
  document.getElementById('previewRow').style.display = 'none';
@@ -331,6 +339,22 @@
  document.getElementById('username').disabled = false;
  }
 
+ function setFormFeedback(message, isError) {
+ const feedback = document.getElementById('formFeedback');
+ feedback.textContent = message;
+ feedback.style.color = isError ? '#f87171' : '#5ec213';
+ feedback.style.display = 'block';
+ }
+
+ function setLeaderboardNotice(message, isWarning) {
+ const notice = document.getElementById('leaderboardNotice');
+ notice.textContent = message;
+ notice.style.color = isWarning ? '#fbbf24' : '#5ec213';
+ notice.style.background = isWarning ? 'rgba(251,191,36,.08)' : 'rgba(94,194,19,.08)';
+ notice.style.border = '1px solid ' + (isWarning ? 'rgba(251,191,36,.25)' : 'rgba(94,194,19,.25)');
+ notice.style.display = 'block';
+ }
+
  document.getElementById('userForm').addEventListener('submit', async (e) => {
  e.preventDefault();
 
@@ -338,7 +362,11 @@
  const action = document.getElementById('modalAction').value;
  const isEdit = !!userId;
  const amtField = isEdit ? document.getElementById('points') : document.getElementById('pointsAdd');
- const amt = parseInt(amtField ? amtField.value : 0) || 0;
+ const amt = Number(amtField ? amtField.value : 0);
+ if (!Number.isSafeInteger(amt) || amt < 0) {
+  setFormFeedback('Enter a whole number of XP, zero or greater.', true);
+  return;
+ }
 
  const data = {
  username: document.getElementById('username').value,
@@ -349,6 +377,7 @@
  };
 
  const btn = document.getElementById('submitBtn');
+ document.getElementById('formFeedback').style.display = 'none';
  btn.disabled = true;
  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
 
@@ -363,17 +392,23 @@
  body: JSON.stringify(data)
  });
 
- const result = await response.json();
+ const result = await response.json().catch(() => ({}));
 
- if (result.success) {
- closeModal();
- loadLeaderboard();
+ if (response.ok && result.success) {
+  closeModal();
+  await loadLeaderboard();
+  const savedUserId = String(result.userId || userId || '');
+  const isInTop100 = savedUserId && currentData.some(entry => String(entry._id) === savedUserId);
+  setLeaderboardNotice(
+   isInTop100 ? (result.message || 'Saved successfully.') : 'Saved successfully. This user is currently outside the top 100, so they are not visible in this list yet.',
+   !isInTop100
+  );
  } else {
- alert(result.message || 'Error saving user');
+ setFormFeedback(result.message || `Save failed (HTTP ${response.status}).`, true);
  }
  } catch (error) {
  console.error('Error:', error);
- alert('Network error. Please try again.');
+ setFormFeedback('Could not reach the server. Check your connection and try again.', true);
  } finally {
  btn.disabled = false;
  btn.innerHTML = '<i class="fas fa-save"></i> Save';

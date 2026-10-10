@@ -1368,7 +1368,7 @@ router.post('/api/leaderboard/add', isAdmin, requireSection('leaderboard'), asyn
       if (leaderboardUser) {
         leaderboardUser.xp = xpPoints;
         await leaderboardUser.save();
-        return res.json({ success: true, message: 'Existing user XP updated on the global leaderboard' });
+        return res.json({ success: true, userId: leaderboardUser._id, message: 'Existing user XP updated on the global leaderboard' });
       }
       leaderboardUser = new User({
         username: cleanUsername,
@@ -1379,7 +1379,7 @@ router.post('/api/leaderboard/add', isAdmin, requireSection('leaderboard'), asyn
         isVerified: true
       });
       await leaderboardUser.save();
-      return res.json({ success: true, message: 'User added to leaderboard' });
+      return res.json({ success: true, userId: leaderboardUser._id, message: 'User added to leaderboard' });
     } else {
       // Add user to quest leaderboard
       const UserQuestProgress = require('../models/UserQuestProgress');
@@ -1430,7 +1430,7 @@ router.post('/api/leaderboard/add', isAdmin, requireSection('leaderboard'), asyn
         await progress.save();
       }
       require('../controllers/questController').invalidateQuestLeaderboard(leaderboardType);
-      return res.json({ success: true, message: 'User added or updated on the quest leaderboard' });
+      return res.json({ success: true, userId: user._id, message: 'User added or updated on the quest leaderboard' });
     }
   } catch (error) {
     console.error('Error adding user:', error);
