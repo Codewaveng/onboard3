@@ -113,6 +113,11 @@ const userQuestProgressSchema = new mongoose.Schema({
       type: Number,
       default: 0
     },
+    // Manual XP adjustment made from the admin leaderboard manager
+    adminAdjustmentXp: {
+      type: Number,
+      default: 0
+    },
     // Total XP earned from this quest
     totalXp: {
       type: Number,
@@ -212,7 +217,8 @@ userQuestProgressSchema.pre('save', function(next) {
     (this.xpBreakdown.baseXp || 0) +
     (this.xpBreakdown.referralJoinBonus || 0) +
     (this.xpBreakdown.referralCompleteBonus || 0) +
-    (this.xpBreakdown.winnerBonus || 0);
+    (this.xpBreakdown.winnerBonus || 0) +
+    (this.xpBreakdown.adminAdjustmentXp || 0);
   
   next();
 });
@@ -232,7 +238,8 @@ userQuestProgressSchema.methods.calculateReferralXp = function() {
     (this.xpBreakdown.baseXp || 0) +
     joinXp +
     completeXp +
-    (this.xpBreakdown.winnerBonus || 0);
+    (this.xpBreakdown.winnerBonus || 0) +
+    (this.xpBreakdown.adminAdjustmentXp || 0);
 };
 
 // Full XP recalculation - use this to fix any sync issues

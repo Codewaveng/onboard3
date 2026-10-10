@@ -827,8 +827,8 @@ exports.getQuestLeaderboardAdmin = async (req, res) => {
       status: { $in: ['completed', 'in_progress'] }
     })
     .populate('userId', 'username email _id')
-    .sort({ 'xpBreakdown.totalXp': -1, completedAt: 1 })
-    .limit(500)
+    .sort({ 'xpBreakdown.totalXp': -1, lastXpAt: 1, completedAt: 1, startedAt: 1, createdAt: 1 })
+    .limit(100)
     .lean();
 
     // 🔧 FIX: Transform data to ensure userId is always a string

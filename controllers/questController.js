@@ -21,6 +21,7 @@ function _setLbCache(questId, data) {
 function _invalidateLbCache(questId) {
   _lbCache.delete(questId.toString());
 }
+exports.invalidateQuestLeaderboard = _invalidateLbCache;
 
 // Tiebreaker: same XP → completed beats in_progress; both completed → earlier completedAt wins; both in_progress → earlier startedAt wins
 function _sortLeaderboard(entries) {
@@ -266,8 +267,8 @@ exports.getQuestDetails = async (req, res) => {
       })
       .select('-taskProgress')
       .populate('userId', 'username profilePicture')
-      .sort({ 'xpBreakdown.totalXp': -1 })
-      .limit(500)
+      .sort({ 'xpBreakdown.totalXp': -1, lastXpAt: 1, completedAt: 1, startedAt: 1, createdAt: 1 })
+      .limit(100)
       .lean();
       validLeaderboard = _sortLeaderboard(lb.filter(entry => entry.userId));
       _setLbCache(questId, validLeaderboard);
@@ -751,7 +752,8 @@ exports.submitTask = async (req, res) => {
       (userProgress.xpBreakdown.baseXp || 0) +
       (userProgress.xpBreakdown.referralJoinBonus || 0) +
       (userProgress.xpBreakdown.referralCompleteBonus || 0) +
-      (userProgress.xpBreakdown.winnerBonus || 0);
+      (userProgress.xpBreakdown.winnerBonus || 0) +
+      (userProgress.xpBreakdown.adminAdjustmentXp || 0);
 
     userProgress.markModified('xpBreakdown');
 
@@ -797,7 +799,8 @@ exports.submitTask = async (req, res) => {
         baseQuestXp +
         (userProgress.xpBreakdown.referralJoinBonus || 0) +
         (userProgress.xpBreakdown.referralCompleteBonus || 0) +
-        (userProgress.xpBreakdown.winnerBonus || 0);
+        (userProgress.xpBreakdown.winnerBonus || 0) +
+        (userProgress.xpBreakdown.adminAdjustmentXp || 0);
 
       userProgress.markModified('xpBreakdown');
 
@@ -963,8 +966,8 @@ exports.getQuestLeaderboard = async (req, res) => {
       })
       .select('-taskProgress')
       .populate('userId', 'username profilePicture')
-      .sort({ 'xpBreakdown.totalXp': -1 })
-      .limit(500)
+      .sort({ 'xpBreakdown.totalXp': -1, lastXpAt: 1, completedAt: 1, startedAt: 1, createdAt: 1 })
+      .limit(100)
       .lean();
       validLeaderboard = _sortLeaderboard(leaderboard.filter(entry => entry.userId));
       _setLbCache(questId, validLeaderboard);
@@ -1019,8 +1022,8 @@ exports.getQuestLeaderboardJSON = async (req, res) => {
       })
       .select('-taskProgress')
       .populate('userId', 'username profilePicture')
-      .sort({ 'xpBreakdown.totalXp': -1 })
-      .limit(500)
+      .sort({ 'xpBreakdown.totalXp': -1, lastXpAt: 1, completedAt: 1, startedAt: 1, createdAt: 1 })
+      .limit(100)
       .lean();
       validLeaderboard = _sortLeaderboard(lb.filter(entry => entry.userId));
       _setLbCache(questId, validLeaderboard);
@@ -1222,6 +1225,7 @@ async function updateQuestLeaderboard(questId, quest) {
                          (progress.xpBreakdown?.baseXp || 0) +
                          (progress.xpBreakdown?.referralJoinBonus || 0) +
                          (progress.xpBreakdown?.referralCompleteBonus || 0) +
+                         (progress.xpBreakdown?.adminAdjustmentXp || 0) +
                          winnerBonusXp;
         update['xpBreakdown.winnerBonus'] = winnerBonusXp;
         update['xpBreakdown.totalXp']     = newTotal;

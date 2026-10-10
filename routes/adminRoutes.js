@@ -1301,7 +1301,7 @@ router.get('/leaderboard', isAdminPage, requireSection('leaderboard'), async (re
   try {
     const User = require('../models/User');
     const Quest = require('../models/Quest');
-    const quests = await Quest.find({ isActive: true }).select('title _id').sort({ createdAt: -1 });
+    const quests = await Quest.find().select('title _id isActive').sort({ isActive: -1, createdAt: -1 });
     res.render('admin/leaderboard-manager', { title: 'Leaderboard Manager', user: req.user, admin: req.user, quests: quests });
   } catch (error) {
     console.error('Error loading leaderboard:', error);
@@ -1328,9 +1328,9 @@ router.get('/api/leaderboard/data', isAdmin, requireSection('leaderboard'), asyn
       return res.json({ success: true, data });
     } else {
       // Quest-specific leaderboard
-      const progress = await UserQuestProgress.find({ questId: type, status: 'completed' })
+      const progress = await UserQuestProgress.find({ questId: type, status: { $in: ['completed', 'in_progress'] } })
         .populate('userId', 'username isFakeUser')
-        .sort({ 'xpBreakdown.totalXp': -1 })
+        .sort({ 'xpBreakdown.totalXp': -1, lastXpAt: 1, completedAt: 1, startedAt: 1, createdAt: 1 })
         .limit(100);
 
       const data = progress.map(p => ({
@@ -1351,36 +1351,51 @@ router.get('/api/leaderboard/data', isAdmin, requireSection('leaderboard'), asyn
 
 router.post('/api/leaderboard/add', isAdmin, requireSection('leaderboard'), async (req, res) => {
   try {
-    const { username, points, isFakeUser, leaderboardType } = req.body;
+    const { username, points, leaderboardType } = req.body;
     const User = require('../models/User');
-    const bcrypt = require('bcryptjs');
+    const crypto = require('crypto');
+    const cleanUsername = String(username || '').trim();
+    const xpPoints = Number(points);
+    if (cleanUsername.length < 3 || cleanUsername.length > 30)
+      return res.status(400).json({ success: false, message: 'Username must be between 3 and 30 characters' });
+    if (!Number.isSafeInteger(xpPoints) || xpPoints < 0)
+      return res.status(400).json({ success: false, message: 'XP must be a whole number of 0 or more' });
+    const usernamePattern = `^${cleanUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
+    const usernameQuery = { username: { $regex: usernamePattern, $options: 'i' } };
 
     if (leaderboardType === 'global' || !leaderboardType) {
-      // Add user to global leaderboard
-      const existing = await User.findOne({ username });
-      if (existing) return res.json({ success: false, message: 'Username already exists' });
-      const fakeUser = new User({
-        username,
-        email: username.toLowerCase().replace(/\s+/g, '_') + '@fake.onboard3.local',
-        password: await bcrypt.hash(Math.random().toString(36), 10),
-        xp: points || 0,
-        isFakeUser: isFakeUser || false,
+      let leaderboardUser = await User.findOne(usernameQuery);
+      if (leaderboardUser) {
+        leaderboardUser.xp = xpPoints;
+        await leaderboardUser.save();
+        return res.json({ success: true, message: 'Existing user XP updated on the global leaderboard' });
+      }
+      leaderboardUser = new User({
+        username: cleanUsername,
+        email: `leaderboard-${crypto.randomUUID()}@fake.onboard3.local`,
+        password: crypto.randomUUID(),
+        xp: xpPoints,
+        isFakeUser: true,
         isVerified: true
       });
-      await fakeUser.save();
-      res.json({ success: true, message: 'User added to leaderboard' });
+      await leaderboardUser.save();
+      return res.json({ success: true, message: 'User added to leaderboard' });
     } else {
       // Add user to quest leaderboard
       const UserQuestProgress = require('../models/UserQuestProgress');
       const Quest = require('../models/Quest');
+      if (!mongoose.Types.ObjectId.isValid(leaderboardType))
+        return res.status(400).json({ success: false, message: 'Invalid quest' });
+      const quest = await Quest.findById(leaderboardType);
+      if (!quest) return res.status(404).json({ success: false, message: 'Quest not found' });
 
       // Find or create fake user
-      let user = await User.findOne({ username });
+      let user = await User.findOne(usernameQuery);
       if (!user) {
         user = new User({
-          username,
-          email: username.toLowerCase().replace(/\s+/g, '_') + '@fake.onboard3.local',
-          password: await bcrypt.hash(Math.random().toString(36), 10),
+          username: cleanUsername,
+          email: `leaderboard-${crypto.randomUUID()}@fake.onboard3.local`,
+          password: crypto.randomUUID(),
           xp: 0,
           isFakeUser: true,
           isVerified: true
@@ -1388,31 +1403,34 @@ router.post('/api/leaderboard/add', isAdmin, requireSection('leaderboard'), asyn
         await user.save();
       }
 
-      // Check if progress already exists
+      // Add or update the quest entry, including existing in-progress users.
       let progress = await UserQuestProgress.findOne({ userId: user._id, questId: leaderboardType });
+      const taskCount = quest.tasks?.length || 1;
       if (progress) {
-        return res.json({ success: false, message: 'User already in this quest leaderboard' });
+        const xp = progress.xpBreakdown || {};
+        const naturalXp = (xp.taskXp || 0) + (xp.baseXp || 0) + (xp.referralJoinBonus || 0)
+          + (xp.referralCompleteBonus || 0) + (xp.winnerBonus || 0);
+        await UserQuestProgress.updateOne({ _id: progress._id }, { $set: {
+          status: 'completed', progress: 100, tasksCompleted: taskCount,
+          totalTasks: taskCount, completedAt: new Date(),
+          'xpBreakdown.totalXp': xpPoints,
+          'xpBreakdown.adminAdjustmentXp': xpPoints - naturalXp
+        }});
+      } else {
+        progress = new UserQuestProgress({
+          userId: user._id,
+          questId: leaderboardType,
+          status: 'completed',
+          progress: 100,
+          tasksCompleted: taskCount,
+          totalTasks: taskCount,
+          completedAt: new Date(),
+          xpBreakdown: { totalXp: xpPoints, baseXp: xpPoints }
+        });
+        await progress.save();
       }
-
-      const quest = await Quest.findById(leaderboardType);
-      if (!quest) return res.json({ success: false, message: 'Quest not found' });
-
-      // Create quest progress
-      progress = new UserQuestProgress({
-        userId: user._id,
-        questId: leaderboardType,
-        status: 'completed',
-        progress: 100,
-        tasksCompleted: quest.tasks?.length || 1,
-        totalTasks: quest.tasks?.length || 1,
-        completedAt: new Date(),
-        xpBreakdown: {
-          totalXp: points || 0,
-          baseXp: points || 0
-        }
-      });
-      await progress.save();
-      res.json({ success: true, message: 'User added to quest leaderboard' });
+      require('../controllers/questController').invalidateQuestLeaderboard(leaderboardType);
+      return res.json({ success: true, message: 'User added or updated on the quest leaderboard' });
     }
   } catch (error) {
     console.error('Error adding user:', error);
@@ -1424,40 +1442,51 @@ router.post('/api/leaderboard/update/:userId', isAdmin, requireSection('leaderbo
   try {
     const { username, points, delta, action, isFakeUser, leaderboardType } = req.body;
     const User = require('../models/User');
+    if (!['add', 'deduct', 'set'].includes(action))
+      return res.status(400).json({ success: false, message: 'Choose add, deduct, or set XP' });
+    const amount = Number(action === 'set' ? points : delta);
+    if (!Number.isSafeInteger(amount) || amount < 0)
+      return res.status(400).json({ success: false, message: 'XP must be a whole number of 0 or more' });
 
     if (leaderboardType === 'global' || !leaderboardType) {
       const user = await User.findById(req.params.userId);
       if (!user) return res.json({ success: false, message: 'User not found' });
       if (username) user.username = username;
       if (isFakeUser !== undefined) user.isFakeUser = isFakeUser;
-      if (action === 'add')    user.xp = Math.max(0, (user.xp || 0) + (delta || 0));
-      else if (action === 'deduct') user.xp = Math.max(0, (user.xp || 0) - (delta || 0));
-      else if (points !== undefined) user.xp = Math.max(0, points);
+      if (action === 'add') user.xp = (user.xp || 0) + amount;
+      else if (action === 'deduct') user.xp = Math.max(0, (user.xp || 0) - amount);
+      else user.xp = amount;
+      if (!Number.isSafeInteger(user.xp))
+        return res.status(400).json({ success: false, message: 'Resulting XP exceeds the supported range' });
       await user.save();
       res.json({ success: true, message: 'User updated successfully', newTotal: user.xp });
     } else {
+      if (!mongoose.Types.ObjectId.isValid(leaderboardType))
+        return res.status(400).json({ success: false, message: 'Invalid quest' });
       const UserQuestProgress = require('../models/UserQuestProgress');
       const progress = await UserQuestProgress.findOne({ userId: req.params.userId, questId: leaderboardType });
       if (!progress) return res.json({ success: false, message: 'Quest progress not found' });
 
       const current = progress.xpBreakdown?.totalXp || 0;
+      const xp = progress.xpBreakdown || {};
+      const naturalXp = (xp.taskXp || 0) + (xp.baseXp || 0) + (xp.referralJoinBonus || 0)
+        + (xp.referralCompleteBonus || 0) + (xp.winnerBonus || 0);
       let newTotal;
-      if (action === 'add')         newTotal = Math.max(0, current + (delta || 0));
-      else if (action === 'deduct') newTotal = Math.max(0, current - (delta || 0));
-      else                          newTotal = Math.max(0, points !== undefined ? points : current);
+      if (action === 'add') newTotal = current + amount;
+      else if (action === 'deduct') newTotal = Math.max(0, current - amount);
+      else newTotal = amount;
+      if (!Number.isSafeInteger(newTotal))
+        return res.status(400).json({ success: false, message: 'Resulting XP exceeds the supported range' });
 
       // Use updateOne to bypass pre-save hook that would re-sum breakdown fields
       await UserQuestProgress.updateOne(
         { _id: progress._id },
         { $set: {
           'xpBreakdown.totalXp': newTotal,
-          'xpBreakdown.taskXp': 0,
-          'xpBreakdown.baseXp': newTotal,
-          'xpBreakdown.referralJoinBonus': 0,
-          'xpBreakdown.referralCompleteBonus': 0,
-          'xpBreakdown.winnerBonus': 0
+          'xpBreakdown.adminAdjustmentXp': newTotal - naturalXp
         }}
       );
+      require('../controllers/questController').invalidateQuestLeaderboard(leaderboardType);
       res.json({ success: true, message: 'Quest progress updated successfully', newTotal });
     }
   } catch (error) {
@@ -1483,6 +1512,7 @@ router.post('/api/leaderboard/delete/:userId', isAdmin, requireSection('leaderbo
       const progress = await UserQuestProgress.findOne({ userId: req.params.userId, questId: type });
       if (!progress) return res.json({ success: false, message: 'Quest progress not found' });
       await UserQuestProgress.findByIdAndDelete(progress._id);
+      require('../controllers/questController').invalidateQuestLeaderboard(type);
       res.json({ success: true, message: 'Quest leaderboard entry deleted successfully' });
     }
   } catch (error) {
@@ -2474,6 +2504,7 @@ router.post('/api/quest/reset-progress', isAdminPage, async (req, res) => {
           'xpBreakdown.referralJoinBonus':    0,
           'xpBreakdown.referralCompleteBonus':0,
           'xpBreakdown.winnerBonus':          0,
+          'xpBreakdown.adminAdjustmentXp':    0,
           isWinner:   false,
           winnerRank: null
         }
@@ -2516,7 +2547,8 @@ router.post('/api/apex/fix-base-xp', isAdminPage, async (req, res) => {
             (rec.xpBreakdown.taskXp || 0) +
             (rec.xpBreakdown.referralJoinBonus || 0) +
             (rec.xpBreakdown.referralCompleteBonus || 0) +
-            (rec.xpBreakdown.winnerBonus || 0)
+            (rec.xpBreakdown.winnerBonus || 0) +
+            (rec.xpBreakdown.adminAdjustmentXp || 0)
           )
         }}
       );
@@ -2550,7 +2582,8 @@ router.post('/api/apex/fix-winner-bonus', isAdminPage, async (req, res) => {
       rec.xpBreakdown.winnerBonus = 0;
       rec.xpBreakdown.totalXp =
         (rec.xpBreakdown.taskXp || 0) + (rec.xpBreakdown.baseXp || 0) +
-        (rec.xpBreakdown.referralJoinBonus || 0) + (rec.xpBreakdown.referralCompleteBonus || 0);
+        (rec.xpBreakdown.referralJoinBonus || 0) + (rec.xpBreakdown.referralCompleteBonus || 0) +
+        (rec.xpBreakdown.adminAdjustmentXp || 0);
       rec.isWinner = false; rec.winnerRank = null;
       rec.markModified('xpBreakdown');
       await rec.save();
@@ -2622,7 +2655,8 @@ router.post('/fix-all-quest-xp', isAdmin, async (req, res) => {
         (prog.xpBreakdown.baseXp || 0) +
         (prog.xpBreakdown.referralJoinBonus || 0) +
         (prog.xpBreakdown.referralCompleteBonus || 0) +
-        (prog.xpBreakdown.winnerBonus || 0);
+        (prog.xpBreakdown.winnerBonus || 0) +
+        (prog.xpBreakdown.adminAdjustmentXp || 0);
       prog.markModified('xpBreakdown');
       await prog.save();
 

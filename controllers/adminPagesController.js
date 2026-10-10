@@ -606,8 +606,12 @@ exports.reviewTaskSubmission = async (req, res) => {
 
             progress.tasksCompleted = progress.taskProgress.filter(t => t.isCompleted).length;
             progress.xpBreakdown.taskXp = (progress.xpBreakdown.taskXp || 0) + xpReward;
-            progress.xpBreakdown.totalXp = Object.values(progress.xpBreakdown.toObject ? progress.xpBreakdown.toObject() : progress.xpBreakdown)
-                .filter(v => typeof v === 'number').reduce((a, b) => a + b, 0);
+            progress.xpBreakdown.totalXp = (progress.xpBreakdown.taskXp || 0) +
+                (progress.xpBreakdown.baseXp || 0) +
+                (progress.xpBreakdown.referralJoinBonus || 0) +
+                (progress.xpBreakdown.referralCompleteBonus || 0) +
+                (progress.xpBreakdown.winnerBonus || 0) +
+                (progress.xpBreakdown.adminAdjustmentXp || 0);
             progress.progress = Math.round((progress.tasksCompleted / (progress.totalTasks || 1)) * 100);
 
             if (progress.tasksCompleted >= progress.totalTasks && progress.status !== 'completed') {

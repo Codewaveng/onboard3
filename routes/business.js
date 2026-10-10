@@ -466,7 +466,7 @@ router.get('/api/quest/:id/stats', businessAuth, async (req, res) => {
 
     const [leaderboard, completions, participants] = await Promise.all([
       UserQuestProgress.find({ questId: quest._id })
-        .sort({ 'xpBreakdown.totalXp': -1 })
+        .sort({ 'xpBreakdown.totalXp': -1, lastXpAt: 1, completedAt: 1, startedAt: 1, createdAt: 1 })
         .limit(100)
         .populate('userId', 'username')
         .lean(),
@@ -842,7 +842,7 @@ router.post('/api/quest/:id/review/:progressId', businessAuth, async (req, res) 
       progress.progress = Math.round((progress.tasksCompleted / (progress.totalTasks || 1)) * 100);
       progress.xpBreakdown.totalXp = (progress.xpBreakdown.taskXp || 0) + (progress.xpBreakdown.baseXp || 0) +
         (progress.xpBreakdown.referralJoinBonus || 0) + (progress.xpBreakdown.referralCompleteBonus || 0) +
-        (progress.xpBreakdown.winnerBonus || 0);
+        (progress.xpBreakdown.winnerBonus || 0) + (progress.xpBreakdown.adminAdjustmentXp || 0);
       if (progress.tasksCompleted >= (progress.totalTasks || 1) && progress.status !== 'completed') {
         progress.status = 'completed';
         progress.completedAt = new Date();
