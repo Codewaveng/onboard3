@@ -155,7 +155,7 @@
  <div class="b-summary-value"><%= activeBountyCount.toLocaleString('en-US') %></div>
  </div>
  <div class="b-summary-card">
- <div class="b-summary-label">Active Rewards (USDC equivalent)</div>
+ <div class="b-summary-label">Active Rewards (USD equivalent)</div>
  <div class="b-summary-value">$<%= activeBountyRewardUSD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) %></div>
  </div>
  </div>
@@ -202,6 +202,7 @@
  <div class="b-card-foot">
  <div>
  <div class="b-reward-main"><i class="fas fa-coins"></i> <%= (b.rewardPool||0).toLocaleString() %> <%= b.rewardToken||'USDC' %></div>
+ <% if (b.usdValue) { %><div class="b-reward-sub">≈ <%= b.usdValue %> USD</div><% } %>
  </div>
  <% if (b.endDate) { %>
  <span class="b-cd" data-end="<%= new Date(b.endDate).getTime() %>"><i class="fas fa-clock"></i> ...</span>
@@ -282,7 +283,8 @@
  <div class="b-card-title"><%= b.title %></div>
  <div class="b-card-desc"><%= b.shortDescription %></div>
  <div class="b-card-foot">
- <div class="b-reward-main"><i class="fas fa-coins"></i> <%= (b.rewardPool||0).toLocaleString() %> <%= b.rewardToken||'USDC' %></div>
+ <div><div class="b-reward-main"><i class="fas fa-coins"></i> <%= (b.rewardPool||0).toLocaleString() %> <%= b.rewardToken||'USDC' %></div>
+ <% if (b.usdValue) { %><div class="b-reward-sub">≈ <%= b.usdValue %> USD</div><% } %></div>
  <span style="font-size:.7rem;color:var(--text-3)"><%= b.totalSubmissions||0 %> submissions</span>
  </div>
  </div>
@@ -321,6 +323,7 @@
  <div>
  <% if (reward) { %>
  <div class="b-reward-main" style="color:#7c5cbf"><i class="fas fa-coins"></i> <%= reward %></div>
+ <% if (b.usdValue) { %><div class="b-reward-sub">≈ <%= b.usdValue %> USD</div><% } %>
  <% } %>
  <% if (hasWin) { %>
  <div style="font-size:.7rem;color:#fbbf24;font-weight:700;margin-top:2px"><i class="fas fa-trophy"></i> <%= b.winners.length %> winner<%= b.winners.length !== 1 ? 's' : '' %></div>

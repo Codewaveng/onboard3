@@ -13,7 +13,8 @@ const ZAD_HEADERS = () => ({ Authorization: `Bearer ${ZAD_KEY}`, 'Content-Type':
 let _priceCache   = {};
 let _priceCacheAt = 0;
 // Maps token symbol → CoinGecko ID (known tokens only)
-const GECKO_IDS = { STX: 'blockstack', BTC: 'bitcoin', sBTC: 'bitcoin', ETH: 'ethereum' };
+// Keep keys normalized to uppercase: normalizeTokenSymbol() returns SBTC.
+const GECKO_IDS = { STX: 'blockstack', BTC: 'bitcoin', SBTC: 'bitcoin', ETH: 'ethereum' };
 const LEO_TENERO_TOKEN = 'https://api.tenero.io/v1/stacks/tokens/SP1AY6K3PQV5MRT6R4S671NWW2FRVPKM0BR162CT6.leo-token';
 const LEO_DIA_ASSET = 'https://api.diadata.org/v1/assetQuotation/Stacks/SP1AY6K3PQV5MRT6R4S671NWW2FRVPKM0BR162CT6.leo-token';
 // Stablecoins always $1
@@ -23,7 +24,11 @@ const normalizeTokenSymbol = (symbol) => String(symbol || '').replace(/^\$/, '')
 async function getTokenPrices(symbols) {
   const now = Date.now();
   const needsLeoPrice = symbols.some(s => normalizeTokenSymbol(s) === 'LEO');
-  if (now - _priceCacheAt < 10 * 60 * 1000 && Object.keys(_priceCache).length && (!needsLeoPrice || _priceCache.LEO)) return _priceCache;
+  const cacheCoversSymbols = symbols.every(s => {
+    const symbol = normalizeTokenSymbol(s);
+    return STABLES.has(symbol) || Number(_priceCache[symbol]) > 0;
+  });
+  if (now - _priceCacheAt < 10 * 60 * 1000 && cacheCoversSymbols && (!needsLeoPrice || _priceCache.LEO)) return _priceCache;
   const ids = [...new Set(symbols.map(s => GECKO_IDS[normalizeTokenSymbol(s)]).filter(Boolean))];
   const prices = {};
   if (ids.length) {
@@ -163,7 +168,11 @@ exports.listBounties = async (req, res) => {
     ].filter(Boolean))];
     const prices   = await getTokenPrices(symbols);
 
-    // Attach usdValue to each ZAD bounty
+    // Attach USD estimates to both internal and ZAD bounties.
+    const enrichInternal = (b) => ({
+      ...b,
+      usdValue: toUSD(b.rewardPool, b.rewardToken || 'USDC', prices)
+    });
     const enrichZAD = (b) => ({
       ...b,
       usdValue: toUSD(b.totalPayment, b.token?.symbol, prices)
@@ -177,7 +186,8 @@ exports.listBounties = async (req, res) => {
 
     res.render('dashboard/bounty', {
       title: 'Bounties — ONBOARD3', user, currentPage: 'bounties',
-      internalLive, internalEnded,
+      internalLive: internalLive.map(enrichInternal),
+      internalEnded: internalEnded.map(enrichInternal),
       zadLive: zadLive.map(enrichZAD),
       zadPast: zadPast.map(enrichZAD),
       activeBountyCount, activeBountyRewardUSD
@@ -201,9 +211,16 @@ exports.internalBountyDetail = async (req, res) => {
 
     const mySubmission = submissions.find(s => s.userId?._id?.toString() === req.session.userId) || null;
 
+    const prices = await getTokenPrices([bounty.rewardToken || 'USDC']);
+    const bountyUsdValue = toUSD(bounty.rewardPool, bounty.rewardToken || 'USDC', prices);
+    bounty.rewardSplit = (bounty.rewardSplit || []).map(split => {
+      const amount = split.amount || Math.round(bounty.rewardPool * split.percentage / 100 * 100) / 100;
+      return { ...split, usdValue: toUSD(amount, bounty.rewardToken || 'USDC', prices) };
+    });
+
     res.render('dashboard/bounty-details', {
       title: bounty.title + ' — ONBOARD3', user, currentPage: 'bounties',
-      bounty, submissions, mySubmission
+      bounty: { ...bounty, usdValue: bountyUsdValue }, submissions, mySubmission
     });
   } catch (err) {
     console.error('[Bounty] internalBountyDetail:', err);

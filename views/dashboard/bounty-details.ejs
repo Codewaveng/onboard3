@@ -173,7 +173,7 @@
  <h1 class="bd-title"><%= bounty.title %></h1>
  <p class="bd-short"><%= bounty.shortDescription %></p>
  <div class="bd-pills">
- <span class="bd-pill bd-pill-pool"><i class="fas fa-coins"></i> <%= (bounty.rewardPool||0).toLocaleString() %> <%= bounty.rewardToken || 'USDC' %> Pool</span>
+ <span class="bd-pill bd-pill-pool"><i class="fas fa-coins"></i> <%= (bounty.rewardPool||0).toLocaleString() %> <%= bounty.rewardToken || 'USDC' %> Pool<% if (bounty.usdValue) { %> (≈ <%= bounty.usdValue %> USD)<% } %></span>
  <span class="bd-pill bd-pill-subs"><i class="fas fa-file-alt"></i> <%= submissions.length %> Submission<%= submissions.length !== 1 ? 's' : '' %></span>
  <button type="button" class="bd-quick-submit" <%= (bounty.status === 'winners_announced' || bounty.hasEnded || (bounty.endDate && new Date() > new Date(bounty.endDate)) || mySubmission) ? 'disabled' : '' %> <%= mySubmission ? 'title="You already submitted"' : ((bounty.status === 'winners_announced' || bounty.hasEnded || (bounty.endDate && new Date() > new Date(bounty.endDate))) ? 'title="Submissions are closed"' : '') %> onclick="openSubmitDialog()"><i class="fas fa-paper-plane"></i> Submit Bounty</button>
  </div>
@@ -206,7 +206,7 @@
  <tr>
  <td class="gold"><%= i===0?'':i===1?'':i===2?'':'#'+(i+1) %> <%= s.label %></td>
  <td><%= s.percentage %>%</td>
- <td class="gold"><%= (s.amount || Math.round(bounty.rewardPool * s.percentage / 100 * 100)/100).toLocaleString() %> <%= bounty.rewardToken || 'USDC' %></td>
+ <td class="gold"><%= (s.amount || Math.round(bounty.rewardPool * s.percentage / 100 * 100)/100).toLocaleString() %> <%= bounty.rewardToken || 'USDC' %><% if (s.usdValue) { %><br><small>≈ <%= s.usdValue %> USD</small><% } %></td>
  </tr>
  <% }); %>
  </tbody>
