@@ -190,7 +190,7 @@
  <% } else { %>
  <span class="bde-badge bde-badge--live"><i class="fas fa-circle" style="font-size:.5rem"></i> Live</span>
  <% } %>
- <% if (bounty.type) { %><span class="bde-badge" style="background:rgba(255,255,255,.06);color:var(--text-2);border:1px solid rgba(255,255,255,.1)"><%= bounty.type %></span><% } %>
+ <% if (bounty.winnerCategory) { %><span class="bde-badge" style="background:rgba(255,255,255,.06);color:var(--text-2);border:1px solid rgba(255,255,255,.1)"><%= bounty.winnerCategory %></span><% } %>
  </div>
  <h1 class="bde-title"><%= bounty.name %></h1>
  <% if (bounty.creator?.username) { %>
@@ -379,8 +379,16 @@
  <% } else if (mySubmission) { %>
  <div style="text-align:center;padding:.5rem 0">
  <i class="fas fa-check-circle" style="font-size:2.5rem;color:#c084fc;display:block;margin-bottom:.75rem"></i>
+ <% if (mySubmission.status === 'pending') { %>
+ <h3 style="color:#fbbf24;font-size:.9375rem">Transaction sent; ZAD confirmation pending</h3>
+ <p style="color:var(--text-3);font-size:.8rem;margin-bottom:.75rem">ZeroAuthDAO did not confirm its listing yet. This attempt is saved to prevent a duplicate. Do not resubmit.</p>
+ <% } else if (mySubmission.xVerified === false) { %>
+ <h3 style="color:#c084fc;font-size:.9375rem">Submitted; X verification skipped</h3>
+ <p style="color:var(--text-3);font-size:.8rem;margin-bottom:.75rem">Your X post link was submitted, but ZAD did not verify account ownership or post activity. The bounty owner may consider it unverified or ineligible.</p>
+ <% } else { %>
  <h3 style="color:#c084fc;font-size:.9375rem">Submitted!</h3>
  <p style="color:var(--text-3);font-size:.8rem;margin-bottom:.75rem">Your submission is recorded.</p>
+ <% } %>
  <div style="background:rgba(255,255,255,.04);border-radius:10px;padding:.75rem;text-align:left;font-size:.8rem">
  <p style="color:var(--text-3);line-height:1.5"><%= mySubmission.summary.substring(0,120) %><%= mySubmission.summary.length>120?'...':'' %></p>
  <div style="margin-top:.5rem;font-size:.72rem;color:var(--text-3);font-weight:600"><i class="fas fa-info-circle"></i> Recorded on ONBOARD3</div>
@@ -405,7 +413,12 @@
  </div>
  <div class="bde-fg">
  <label>Work URL *</label>
- <input type="url" id="subUrl" placeholder="http://x.com/" required>
+ <% if (bounty.type === 'XVerification') { %>
+ <p style="font-size:.75rem;color:var(--text-3);line-height:1.45;margin:.1rem 0 .45rem">Use a public X/Twitter post link. ONBOARD3 does not require linking your X account to ZAD; the entry may remain unverified or ineligible there.</p>
+ <input type="url" id="subUrl" placeholder="https://x.com/username/status/123" required>
+ <% } else { %>
+ <input type="url" id="subUrl" placeholder="https://" required>
+ <% } %>
  </div>
  <button type="submit" class="bde-submit-btn" id="submitBtn"><i class="fas fa-paper-plane"></i> Submit</button>
  </form>

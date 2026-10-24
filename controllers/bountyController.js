@@ -79,6 +79,17 @@ function toUSDAmount(amount, symbol, prices) {
   return Number.isFinite(price) && price > 0 ? quantity * price : 0;
 }
 
+// ZAD's bounty mechanism names (CustomSplit, XVerification, etc.) describe how
+// a bounty is configured. ONBOARD3 surfaces the reward structure consistently
+// as either single-winner or multiple-winner.
+function getWinnerCategory(bounty) {
+  const type = String(bounty?.type || '').replace(/[\s_-]/g, '').toLowerCase();
+  if (['multiwinner', 'customsplit', 'top3bidder', 'xverification'].includes(type)) return 'Multiple Winners';
+  if (type === 'singlewinner') return 'Single Winner';
+  const count = Number(bounty?.winnerCount ?? bounty?.winnersCount ?? bounty?.maxWinners ?? 0);
+  return count > 1 ? 'Multiple Winners' : 'Single Winner';
+}
+
 // ── ZAD cache (5 min TTL) ─────────────────────────────────────────────────────
 let _zadLiveCache   = null; let _zadLiveCacheAt = 0;
 let _zadPastCache   = null; let _zadPastCacheAt = 0;
@@ -175,6 +186,7 @@ exports.listBounties = async (req, res) => {
     });
     const enrichZAD = (b) => ({
       ...b,
+      winnerCategory: getWinnerCategory(b),
       usdValue: toUSD(b.totalPayment, b.token?.symbol, prices)
     });
 
@@ -362,7 +374,7 @@ exports.externalBountyDetail = async (req, res) => {
 
     res.render('dashboard/bounty-external', {
       title: (zadBounty.name || 'Bounty') + ' — ONBOARD3', user, currentPage: 'bounties',
-      bounty: { ...zadBounty, usdValue }, mySubmission: mySubmission || null, ourSubmissions,
+      bounty: { ...zadBounty, winnerCategory: getWinnerCategory(zadBounty), usdValue }, mySubmission: mySubmission || null, ourSubmissions,
       enrichedWinners,
       userStacksAddress: user?.stacksAddress || null,
       zadBountyUrl: `https://zeroauthoritydao.com/bounty/${bountyId}`
@@ -380,7 +392,6 @@ exports.submitToExternalBounty = async (req, res) => {
     const bountyId = req.params.id;
 
     if (!summary?.trim() || !submissionUrl?.trim()) return res.status(400).json({ success: false, message: 'Summary and work URL are required' });
-
     const existing = await ThirdPartySubmission.findOne({ externalBountyId: bountyId, userId: req.session.userId });
     if (existing) return res.status(400).json({ success: false, message: 'You have already submitted to this bounty.' });
 
@@ -388,6 +399,10 @@ exports.submitToExternalBounty = async (req, res) => {
     if (!zadBounty) return res.status(404).json({ success: false, message: 'Bounty not found on external platform' });
     if (zadBounty.isExpired || zadBounty.status !== 'Open') {
       return res.status(400).json({ success: false, message: 'This bounty is no longer accepting submissions.' });
+    }
+    if (String(zadBounty.type || '').toLowerCase() === 'xverification' &&
+        !/^https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[A-Za-z0-9_]+\/status\/\d+(?:[/?#].*)?$/i.test(submissionUrl.trim())) {
+      return res.status(400).json({ success: false, message: 'Enter a public X/Twitter post link in the format x.com/username/status/123.' });
     }
 
     const sw = require('../utils/stacksWallet');
@@ -412,12 +427,16 @@ exports.submitToExternalBounty = async (req, res) => {
     let txId = null;
     let serverSubmissionId = null;
     let serverAccepted = false;
+    let relayPending = false;
+    let xVerified = null;
     let onChainError = null;
     try {
-      const onChain = await sw.submitBountyOnChain(req.session.userId, bountyId, taggedSummary, submissionUrl?.trim() || null, zadBounty.txId);
+      const onChain = await sw.submitBountyOnChain(req.session.userId, bountyId, taggedSummary, submissionUrl?.trim() || null, zadBounty.txId, zadBounty.type);
       txId = onChain.txId;
       serverSubmissionId = onChain.zadSubId || null;
       serverAccepted = Boolean(onChain.accepted);
+      relayPending = Boolean(onChain.relayPending);
+      xVerified = typeof onChain.xVerified === 'boolean' ? onChain.xVerified : null;
     } catch (err) {
       onChainError = err.message;
       console.error('[Bounty] on-chain submit failed:', err.message);
@@ -431,7 +450,8 @@ exports.submitToExternalBounty = async (req, res) => {
       platform: 'zeroauthoritydao', externalBountyId: bountyId,
       bountyName: zadBounty.name || '', userId: req.session.userId,
       summary: summary.trim(), submissionUrl: submissionUrl?.trim() || null,
-      zadSubmissionId: serverSubmissionId || txId, status: 'submitted'
+      zadSubmissionId: serverSubmissionId || txId, status: relayPending ? 'pending' : 'submitted',
+      xVerified,
     });
 
     _zadLiveCache = null; _zadLiveCacheAt = 0;
@@ -439,7 +459,12 @@ exports.submitToExternalBounty = async (req, res) => {
     if (txId || serverSubmissionId || serverAccepted) {
       return res.json({
         success: true,
-        message: 'Submission confirmed by ZeroAuthDAO. Your entry is live.',
+        pending: relayPending,
+        message: relayPending
+          ? `Stacks has the sponsored transaction (${txId}), but ZeroAuthDAO has not confirmed its listing yet. We recorded it to prevent a duplicate; do not submit again.`
+          : xVerified === false
+            ? 'Submission accepted, but X verification was bypassed. ZAD may mark it unverified or ineligible.'
+          : 'Submission confirmed by ZeroAuthDAO. Your entry is live.',
         txId,
         submissionId: serverSubmissionId,
         stacksAddress: wallet.address

@@ -220,7 +220,7 @@
  var bTitle = b.name || b.title || 'Bounty';
  var desc = String(b.description || b.shortDescription || '');
  var bid = b.id || b._id;
- var cat = typeof b.category === 'string' ? b.category : (typeof b.type === 'string' ? b.type : '');
+ var cat = typeof b.category === 'string' ? b.category : '';
  var endTs = b.deadline ? new Date(b.deadline).getTime() : (b.endDate ? new Date(b.endDate).getTime() : 0);
  var imgSrc = b.imageUrl || b.logo || '/img/partners/zero.jpg';
  %>
@@ -234,6 +234,7 @@
  <span class="b-tag b-tag--ext">ZeroAuthDAO</span>
  <span class="b-tag b-tag--live"><i class="fas fa-circle" style="font-size:.4rem"></i> Active</span>
  <% if (cat) { %><span class="b-tag b-tag--cat"><%= cat %></span><% } %>
+ <% if (b.winnerCategory) { %><span class="b-tag b-tag--cat"><%= b.winnerCategory %></span><% } %>
  </div>
  <div class="b-card-title"><%= bTitle %></div>
  <div class="b-card-desc"><%= desc.substring(0, 110) %><%= desc.length > 110 ? '…' : '' %></div>
@@ -298,7 +299,7 @@
  var bTitle = b.name || b.title || 'Bounty';
  var desc = String(b.description || b.shortDescription || '');
  var bid = b.id || b._id;
- var cat = typeof b.category === 'string' ? b.category : (typeof b.type === 'string' ? b.type : '');
+ var cat = typeof b.category === 'string' ? b.category : '';
  var hasWin = b.winners && b.winners.length > 0;
  var imgSrc = b.imageUrl || b.logo || '/img/partners/zero.jpg';
  %>
@@ -316,6 +317,7 @@
  <span class="b-tag b-tag--end">Ended</span>
  <% } %>
  <% if (cat) { %><span class="b-tag b-tag--cat"><%= cat %></span><% } %>
+ <% if (b.winnerCategory) { %><span class="b-tag b-tag--cat"><%= b.winnerCategory %></span><% } %>
  </div>
  <div class="b-card-title"><%= bTitle %></div>
  <div class="b-card-desc"><%= desc.substring(0, 110) %><%= desc.length > 110 ? '…' : '' %></div>

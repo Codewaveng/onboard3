@@ -7,6 +7,7 @@ const thirdPartySubmissionSchema = new mongoose.Schema({
   userId:           { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   summary:          { type: String, required: true },
   submissionUrl:    { type: String, default: null },
+  xVerified:        { type: Boolean, default: null }, // null for non-X bounties; false when ONBOARD3 bypassed ZAD's X check
   zadSubmissionId:  { type: String, default: null },    // confirmed ZAD submission ID if proxied successfully
   status:           { type: String, enum: ['pending', 'submitted', 'winner'], default: 'pending' },
   amountWon:        { type: Number, default: null },
