@@ -100,7 +100,7 @@
  <div style="color:#f87171;font-weight:800;font-size:.875rem;margin-bottom:.25rem">Missing environment variables</div>
  <div style="color:#aaa;font-size:.8125rem;line-height:1.6">
  <% if (!hasSeed) { %>
- <div>• <code style="color:#f87171">STACKS_MASTER_SEED</code> — run <code>node scripts/generate-stacks-seed.js</code> to create one</div>
+ <div>• <code style="color:#f87171">STACKS_MASTER_SEED</code> — configure a securely generated recovery phrase outside this repository; never commit it</div>
  <% } %>
  <% if (!hasMainWallet) { %>
  <div>• <code style="color:#f87171">STACKS_MAIN_WALLET</code> — your personal Stacks address where all sweep funds land</div>
