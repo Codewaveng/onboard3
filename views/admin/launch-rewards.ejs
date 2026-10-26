@@ -80,15 +80,12 @@ tr:hover td{background:rgba(255,255,255,.025)}
 </div>
 
 <div class="actions">
- <% if (stats.total === 0) { %>
- <button class="btn btn-primary" onclick="seedRewards()"><i class="fas fa-database"></i> Seed Rewards (First Run)</button>
- <% } else if (stats.pending > 0) { %>
+ <% if (stats.pending > 0) { %>
  <button class="btn btn-primary" onclick="confirmDistribute()"><i class="fas fa-paper-plane"></i> Distribute USDC to <%= stats.pending %> users</button>
  <% } else { %>
  <button class="btn btn-outline" disabled><i class="fas fa-check-circle"></i> All rewards distributed</button>
  <% } %>
  <button class="btn btn-outline" onclick="location.reload()"><i class="fas fa-rotate-right"></i> Refresh</button>
- <button class="btn" style="background:rgba(251,191,36,.1);color:#fbbf24;border:1px solid rgba(251,191,36,.25)" onclick="fixManualOverrides()"><i class="fas fa-wrench"></i> Fix Manual Overrides</button>
  <button class="btn" style="background:rgba(94,194,19,.1);color:#5EC213;border:1px solid rgba(94,194,19,.25)" onclick="document.getElementById('creditModal').style.display='flex'"><i class="fas fa-plus-circle"></i> Credit User Balance</button>
  <% if (stats.failed > 0) { %>
  <button class="btn btn-danger" onclick="retryFailed()"><i class="fas fa-redo"></i> Retry <%= stats.failed %> Failed</button>
@@ -168,7 +165,7 @@ tr:hover td{background:rgba(255,255,255,.025)}
 <% } else { %>
 <div style="text-align:center;padding:3rem;color:var(--t3)">
  <i class="fas fa-coins" style="font-size:2.5rem;margin-bottom:1rem;display:block"></i>
- <p>No rewards seeded yet. Click "Seed Rewards" to calculate and load the reward list.</p>
+ <p>No launch rewards are currently recorded.</p>
 </div>
 <% } %>
 
@@ -259,23 +256,6 @@ async function saveCreditBalance() {
  }
 }
 
-async function fixManualOverrides() {
- if (!confirm('Scan all MANUAL override users and reset anyone who got less than their intended amount? They will need to redo the welcome task to collect the corrected reward.')) return;
- var r = await fetch('/admin/api/launch-rewards/fix-manual-overrides', { method: 'POST', headers: { 'Accept': 'application/json' } });
- var d = await r.json();
- if (d.ok) {
- if (d.fixed.length === 0) {
- alert('All manual override users already have the correct amounts. Nothing to fix.');
- } else {
- var lines = d.fixed.map(function(f) { return '@' + f.username + ': $' + f.was.toFixed(2) + ' → $' + f.now.toFixed(2); }).join('\n');
- alert('Fixed ' + d.fixed.length + ' user(s):\n\n' + lines + '\n\nThey can now redo the welcome task to collect the correct amount.');
- location.reload();
- }
- } else {
- alert('Error: ' + (d.error || 'unknown'));
- }
-}
-
 function openResetReward(id, username, currentAmount) {
  document.getElementById('rr_id').value = id;
  document.getElementById('rr_amount').value = parseFloat(currentAmount).toFixed(2);
@@ -343,17 +323,6 @@ function filter(status, btn) {
  document.querySelectorAll('#rewardTable tr').forEach(tr => {
  tr.style.display = (status === 'all' || tr.dataset.status === status) ? '' : 'none';
  });
-}
-
-async function seedRewards() {
- if (!confirm('Seed reward list from DB? This calculates all rewards and stores them.')) return;
- const msg = document.getElementById('statusMsg');
- msg.style.display = '';
- msg.textContent = 'Seeding rewards... (this may take 30-60s)';
- const r = await fetch('/admin/api/launch-rewards/seed', { method: 'POST' });
- const d = await r.json();
- if (d.ok) { msg.textContent = ' Seeded! Reloading...'; setTimeout(() => location.reload(), 1500); }
- else { msg.textContent = ' Error: ' + (d.error || 'unknown'); }
 }
 
 async function confirmDistribute() {

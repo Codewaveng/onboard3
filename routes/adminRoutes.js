@@ -899,20 +899,6 @@ router.get('/launch-rewards', isAdmin, async (req, res) => {
   }
 });
 
-router.post('/api/launch-rewards/seed', isAdmin, async (req, res) => {
-  try {
-    const { execFile } = require('child_process');
-    const path = require('path');
-    const script = path.join(__dirname, '../scripts/seed-launch-rewards.js');
-    execFile('node', [script], { timeout: 120000 }, (err, stdout, stderr) => {
-      if (err) return res.json({ ok: false, error: err.message, stderr });
-      res.json({ ok: true, output: stdout });
-    });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
-
 let _distributing = false;
 router.post('/api/launch-rewards/distribute', isAdmin, async (req, res) => {
   if (_distributing) return res.json({ ok: false, error: 'Distribution already running' });
@@ -1020,43 +1006,6 @@ router.post('/api/launch-rewards/:rewardId/reset', isAdmin, async (req, res) => 
       }
     });
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// Fix all MANUAL override users who received the wrong (lower) amount
-router.post('/api/launch-rewards/fix-manual-overrides', isAdmin, async (req, res) => {
-  try {
-    const User = require('../models/User');
-    const MANUAL = {
-      'ridique': 5, 'zaynab': 5, 'lrick 05': 5,
-      'bolacrypt': 3, 'defioyin': 3, 'luckee': 3, 'trae♠️': 3, 'promzy10': 3,
-      'ragnar': 3, 'obasalopi': 3, 'imxihab': 3, 'levrone': 3, 'cynthia anto': 3,
-      'naana': 2, 'abdulkourey': 2, 'ibnmarzuk': 2, 'jayed': 2, 'ghostdev': 2,
-      'desmonolord': 1, 'desmondolord': 1, 'brainly': 1, 'bless': 1, 'nassir1': 1,
-      'destancrypt': 1, 'adenuga': 1, 'byмusa': 1, 'bymusa': 1, 'jonathan': 1,
-      'dominus': 1, 'king marlito': 1, 'heelat123': 1,
-    };
-
-    const all = await LaunchReward.find({}).lean();
-    const fixed = [];
-
-    for (const r of all) {
-      const key = (r.username || '').toLowerCase().trim();
-      const correctBase = MANUAL[key];
-      if (correctBase === undefined) continue;
-      // Only fix if they got significantly less than intended (more than $0.13 off, accounting for jitter)
-      if (r.amount >= correctBase - 0.13) continue;
-
-      await LaunchReward.updateOne({ _id: r._id }, {
-        $set: { amount: correctBase, tier: correctBase >= 5 ? 'top5' : correctBase >= 3 ? 'legend_manual' : correctBase >= 2 ? 'captain_active' : 'captain', status: 'pending', sentAt: null, failReason: null }
-      });
-      await User.collection.updateOne({ _id: r.userId }, { $set: { launchDayCompleted: false } });
-      fixed.push({ username: r.username, was: r.amount, now: correctBase });
-    }
-
-    res.json({ ok: true, fixed });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
