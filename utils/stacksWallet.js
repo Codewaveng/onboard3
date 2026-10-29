@@ -391,7 +391,7 @@ async function getFeeKey() {
 // Submit a bounty entry on-chain to ZeroAuthDAO from the user's custodial wallet.
 // ONBOARD3 sponsors only the network fee; ZeroAuthDAO's contract remains the
 // destination and bounty/reward fund. ZeroAuthDAO's action broadcasts the tx.
-async function submitBountyOnChain(userId, bountyId, summary, submissionUrl, creationTxId, bountyType = null) {
+async function submitBountyOnChain(userId, bountyId, summary, submissionUrl, creationTxId, bountyType = null, contractHint = {}) {
   const User = require('../models/User');
   const user = await User.findById(userId).select('stacksWalletIndex stacksAddress username profilePicture').lean();
   if (!user || user.stacksWalletIndex == null) throw new Error('User has no Stacks wallet assigned');
@@ -399,14 +399,28 @@ async function submitBountyOnChain(userId, bountyId, summary, submissionUrl, cre
   const parent  = await getParent();
   const userKey = derivePrivKey(parent, user.stacksWalletIndex);
   const network = STACKS_MAINNET;
-  const contractName = await resolveBountyContractName(bountyId, creationTxId);
-  console.log('[ZAD] Submission contract selected:', ZAD_CONTRACT_ADDRESS + '.' + contractName);
+
+  // Prefer contract fields provided directly by ZAD API over the Hiro chain lookup.
+  // ZAD now exposes submitContractAddress, submitContractName, submitFunctionName on
+  // each bounty — using them avoids slow Hiro lookups that can timeout or fail.
+  let contractAddress, contractName, functionName;
+  if (contractHint.contractName && contractHint.contractAddress) {
+    contractAddress = contractHint.contractAddress;
+    contractName    = contractHint.contractName;
+    functionName    = contractHint.functionName || 'submit-entry';
+    console.log('[ZAD] Using contract from API hint:', contractAddress + '.' + contractName);
+  } else {
+    contractName    = await resolveBountyContractName(bountyId, creationTxId);
+    contractAddress = ZAD_CONTRACT_ADDRESS;
+    functionName    = 'submit-entry';
+    console.log('[ZAD] Resolved contract via Hiro:', contractAddress + '.' + contractName);
+  }
 
   // Build an origin-signed transaction that permits a separate fee sponsor.
   const tx = await makeContractCall({
-    contractAddress: ZAD_CONTRACT_ADDRESS,
+    contractAddress,
     contractName,
-    functionName:    'submit-entry',
+    functionName,
     functionArgs:    [stringAsciiCV(bountyId)],
     senderKey:       userKey,
     network,

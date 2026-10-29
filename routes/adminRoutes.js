@@ -1028,6 +1028,24 @@ router.post('/api/users/credit-balance', isAdmin, async (req, res) => {
   }
 });
 
+// Direct balance deduct — silently remove USDC from any user's in-app balance (no notification, no activity log)
+router.post('/api/users/deduct-balance', isAdmin, async (req, res) => {
+  try {
+    const User = require('../models/User');
+    const { username, amount } = req.body;
+    if (!username || !amount) return res.status(400).json({ ok: false, error: 'username and amount required' });
+    const parsed = parseFloat(amount);
+    if (isNaN(parsed) || parsed <= 0) return res.status(400).json({ ok: false, error: 'Invalid amount' });
+    const user = await User.findOne({ username: new RegExp('^' + username.trim() + '$', 'i') }).select('_id username usdcBalance');
+    if (!user) return res.status(404).json({ ok: false, error: 'User not found' });
+    const newBalance = Math.max(0, (user.usdcBalance || 0) - parsed);
+    await User.collection.updateOne({ _id: user._id }, { $set: { usdcBalance: newBalance } });
+    res.json({ ok: true, username: user.username, deducted: parsed, newBalance });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;
 router.get('/api/quests/:questId/winners', isAdmin, adminController.getQuestWinners);
 router.post('/api/quests/distribute-rewards', isAdmin, adminController.distributeQuestRewards);

@@ -208,7 +208,7 @@ app.get("/api/public/stats", async (req, res) => {
       User.countDocuments(),
       UserQuestProgress.countDocuments({ status: 'completed' }),
       Event.countDocuments(),
-      Quest.countDocuments({ isActive: true }),
+      Quest.countDocuments({ isActive: true, $or: [{ endDate: null }, { endDate: { $gt: new Date() } }] }),
       Event.aggregate([{ $group: { _id: null, total: { $sum: '$totalApproved' } } }]),
       Transaction.aggregate([
         { $match: { type: { $in: ['quest_reward', 'referral_bonus'] }, status: 'completed' } },
@@ -240,7 +240,7 @@ app.get("/", async (req, res) => {
 
     const [totalSignups, activeQuests, questsCompleted, rewardsAgg] = await Promise.all([
       User.countDocuments(),
-      Quest.countDocuments({ isActive: true }),
+      Quest.countDocuments({ isActive: true, $or: [{ endDate: null }, { endDate: { $gt: new Date() } }] }),
       UserQuestProgress.countDocuments({ status: 'completed' }),
       Transaction.aggregate([
         { $match: { type: { $in: ['quest_reward', 'referral_bonus'] }, status: 'completed' } },
