@@ -78,9 +78,12 @@ exports.getAllQuests = async (req, res) => {
     
     const now = new Date();
 
-    // Get ALL active quests
+    // Get active quests + quests that ended (to show in Past Quests section)
     const allQuests = await Quest.find({
-      isActive: true
+      $or: [
+        { isActive: true },
+        { isActive: false, endDate: { $exists: true, $ne: null, $lt: now } }
+      ]
     }).sort({ createdAt: -1 });
 
     // Get user's progress — only need status/progress fields, not taskProgress arrays
