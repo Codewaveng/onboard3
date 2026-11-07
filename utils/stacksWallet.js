@@ -569,8 +569,16 @@ async function submitViaPublicAPI(address, privKeyHex, bountyId, summary, submis
 
   const challengeSignature = stacksPersonalSign(privKeyHex, message);
 
-  const subBody = { submitterAddress: address, txHex: signedTxHex, signedChallenge: challengeSignature, nonce, summary: summary || '', submissionUrl: submissionUrl || null };
-  console.log('[ZAD] Submission body keys:', Object.keys(subBody), '| txHex length:', signedTxHex?.length, '| nonce:', nonce, '| sig length:', challengeSignature?.length);
+  const subBody = {
+    submitterAddress:     address,
+    txHex:                signedTxHex,
+    signedChallenge:      challengeSignature,
+    nonce,
+    summary:              summary || '',
+    submissionUrl:        submissionUrl || null,
+    externalSubmissionId: require('crypto').randomUUID(),
+  };
+  console.log('[ZAD] Submission body:', JSON.stringify({ ...subBody, txHex: subBody.txHex?.slice(0, 20) + '...', signedChallenge: subBody.signedChallenge?.slice(0, 20) + '...' }));
 
   try {
     const subRes = await axios.post(
