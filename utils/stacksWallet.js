@@ -572,7 +572,7 @@ async function submitViaPublicAPI(address, privKeyHex, bountyId, summary, submis
   try {
     const subRes = await axios.post(
       `${ZAD_BASE}/api/public/bounties/${bountyId}/submissions`,
-      { submitterAddress: address, signedTxHex, challengeSignature, nonce, summary: summary || '', submissionUrl: submissionUrl || null },
+      { submitterAddress: address, txHex: signedTxHex, signedChallenge: challengeSignature, nonce, summary: summary || '', submissionUrl: submissionUrl || null },
       { headers: apiHdrs, timeout: 30000 }
     );
     const data     = subRes.data || {};
