@@ -569,10 +569,13 @@ async function submitViaPublicAPI(address, privKeyHex, bountyId, summary, submis
 
   const challengeSignature = stacksPersonalSign(privKeyHex, message);
 
+  const subBody = { submitterAddress: address, txHex: signedTxHex, signedChallenge: challengeSignature, nonce, summary: summary || '', submissionUrl: submissionUrl || null };
+  console.log('[ZAD] Submission body keys:', Object.keys(subBody), '| txHex length:', signedTxHex?.length, '| nonce:', nonce, '| sig length:', challengeSignature?.length);
+
   try {
     const subRes = await axios.post(
       `${ZAD_BASE}/api/public/bounties/${bountyId}/submissions`,
-      { submitterAddress: address, txHex: signedTxHex, signedChallenge: challengeSignature, nonce, summary: summary || '', submissionUrl: submissionUrl || null },
+      subBody,
       { headers: apiHdrs, timeout: 30000 }
     );
     const data     = subRes.data || {};
