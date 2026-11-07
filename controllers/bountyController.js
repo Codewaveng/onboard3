@@ -448,7 +448,10 @@ exports.submitToExternalBounty = async (req, res) => {
     }
 
     if (!txId && !serverSubmissionId && !serverAccepted) {
-      return res.status(502).json({ success: false, message: 'ZeroAuthDAO did not confirm acceptance. Check its bounty page before retrying to avoid a duplicate.', ...(onChainError ? { error: onChainError } : {}) });
+      const msg = onChainError
+        ? `Submission failed: ${onChainError}`
+        : 'ZeroAuthDAO did not confirm acceptance. Check its bounty page before retrying to avoid a duplicate.';
+      return res.status(502).json({ success: false, message: msg, error: onChainError || null });
     }
 
     await ThirdPartySubmission.create({
