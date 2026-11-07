@@ -567,7 +567,9 @@ async function submitViaPublicAPI(address, privKeyHex, bountyId, summary, submis
   const message = challengeData.message || challengeData.challenge;
   if (!nonce || !message) throw new Error('ZAD challenge response missing nonce or message field');
 
-  const challengeSignature = stacksPersonalSign(privKeyHex, message);
+  // ZAD verifies ownership by checking the signature against the nonce directly,
+  // not the full SIWS message. Sign the nonce string with the Stacks personal-sign prefix.
+  const challengeSignature = stacksPersonalSign(privKeyHex, nonce);
 
   const subBody = {
     submitterAddress:     address,
