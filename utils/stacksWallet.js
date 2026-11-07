@@ -389,20 +389,19 @@ async function getFeeKey() {
 }
 
 // Submit a bounty entry on-chain to ZeroAuthDAO from the user's custodial wallet.
-// ONBOARD3 sponsors only the network fee; ZeroAuthDAO's contract remains the
-// destination and bounty/reward fund. ZeroAuthDAO's action broadcasts the tx.
+// ZAD's public partner API handles fee sponsorship and broadcasting.
 async function submitBountyOnChain(userId, bountyId, summary, submissionUrl, creationTxId, bountyType = null, contractHint = {}) {
   const User = require('../models/User');
   const user = await User.findById(userId).select('stacksWalletIndex stacksAddress username profilePicture').lean();
   if (!user || user.stacksWalletIndex == null) throw new Error('User has no Stacks wallet assigned');
 
-  const parent  = await getParent();
-  const userKey = derivePrivKey(parent, user.stacksWalletIndex);
-  const network = STACKS_MAINNET;
+  const parent     = await getParent();
+  const userKey    = derivePrivKey(parent, user.stacksWalletIndex);
+  const privKeyHex = userKey.slice(0, 64);
+  const address    = getAddressFromPrivateKey(userKey);
+  const network    = STACKS_MAINNET;
 
-  // Prefer contract fields provided directly by ZAD API over the Hiro chain lookup.
-  // ZAD now exposes submitContractAddress, submitContractName, submitFunctionName on
-  // each bounty — using them avoids slow Hiro lookups that can timeout or fail.
+  // Prefer contract fields from ZAD API over Hiro chain lookup.
   let contractAddress, contractName, functionName;
   if (contractHint.contractName && contractHint.contractAddress) {
     contractAddress = contractHint.contractAddress;
@@ -416,110 +415,35 @@ async function submitBountyOnChain(userId, bountyId, summary, submissionUrl, cre
     console.log('[ZAD] Resolved contract via Hiro:', contractAddress + '.' + contractName);
   }
 
-  // Build an origin-signed transaction that permits a separate fee sponsor.
+  // Build origin-signed, zero-fee sponsored transaction.
+  // ZAD's public API sponsors the fee — do NOT pre-sponsor.
   const tx = await makeContractCall({
     contractAddress,
     contractName,
     functionName,
-    functionArgs:    [stringAsciiCV(bountyId)],
-    senderKey:       userKey,
+    functionArgs: [stringAsciiCV(bountyId)],
+    senderKey:    userKey,
     network,
-    anchorMode:      AnchorMode.Any,
-    sponsored:       true,
+    anchorMode:   AnchorMode.Any,
+    sponsored:    true,
   });
-  const originRaw = tx.serialize();
-  const originSignedTxHex = typeof originRaw === 'string' ? originRaw : Buffer.from(originRaw).toString('hex');
+  const raw = tx.serialize();
+  const originSignedTxHex = typeof raw === 'string' ? raw : Buffer.from(raw).toString('hex');
 
-  // Sponsor with ONBOARD3's dedicated fee wallet, using the SDK's current fee
-  // estimate. ZeroAuthDAO still receives and broadcasts the signed tx; this
-  // wallet pays only the Stacks network fee, never the bounty reward.
-  const feeKey = await getFeeKey();
-  const feeAddress = getAddressFromPrivateKey(feeKey);
-  const sponsoredTx = await sponsorTransaction({
-    transaction: tx,
-    sponsorPrivateKey: feeKey,
-    network,
-  });
-  const sponsorFee = BigInt(sponsoredTx.auth.sponsorSpendingCondition.fee);
-  if (sponsorFee > MAX_ZAD_SUBMISSION_SPONSOR_FEE) {
-    throw new Error(`Estimated Stacks sponsor fee exceeds the 0.02 STX limit (${sponsorFee} microSTX).`);
-  }
-  const feeBalance = await getBalance(feeAddress);
-  if (feeBalance < Number(sponsorFee)) {
-    throw new Error(`ONBOARD3 fee wallet has insufficient STX for the estimated submission fee (${sponsorFee} microSTX).`);
-  }
-  const txId = sponsoredTx.txid();
-  console.log(`[ZAD] ONBOARD3 sponsor attached | wallet ${feeAddress.slice(0, 10)}… | fee ${sponsorFee} microSTX | tx ${txId}`);
+  const result = await submitViaPublicAPI(address, privKeyHex, bountyId, summary || '', submissionUrl || null, originSignedTxHex);
+  console.log('[ZAD] Public API result:', result);
 
-  const raw = sponsoredTx.serialize();
-  const signedTxHex = typeof raw === 'string' ? raw : Buffer.from(raw).toString('hex');
-
-  // Call ZAD's Server Action (broadcasts + creates DB record so it appears on their platform)
-  const webResult = await submitToZADWebAPI(userKey, bountyId, summary || '', submissionUrl || null, signedTxHex, {
-    username: user.username || null,
-    avatarUrl: user.profilePicture || null,
-    bountyType,
-  });
-  console.log('[ZAD] Web2 result:', webResult);
-
-  if (!webResult.success) {
-    // The ZAD action can fail after broadcasting. Check the deterministic txid
-    // before allowing a retry, because the ONBOARD3 sponsor fee may be spent.
-    let chainTx;
-    try {
-      chainTx = await findTransaction(txId, 12, 2500);
-    } catch (lookupError) {
-      throw new Error(`ZeroAuthDAO action failed and Stacks status for ${txId} could not be checked. Check the bounty page before retrying. ${webResult.error || lookupError.message}`);
-    }
-    if (chainTx && ['pending', 'success'].includes(chainTx.tx_status)) {
-      console.warn(`[ZAD] Transaction ${txId} is ${chainTx.tx_status} on Stacks, but ZAD did not confirm its listing. Blocking duplicate retry.`);
-      return {
-        txId,
-        address: user.stacksAddress,
-        zadSubId: null,
-        accepted: false,
-        relayPending: true,
-        chainStatus: chainTx.tx_status,
-        relayError: webResult.error || null,
-        xVerified: webResult.xVerified,
-      };
-    }
-    if (chainTx) {
-      throw new Error(`Stacks transaction ${txId} was found with status ${chainTx.tx_status || 'unknown'}; ZeroAuthDAO did not confirm the submission. Do not retry until this transaction is reviewed.`);
-    }
-    if (/X verification failed|did not run its X verification/i.test(webResult.error || '')) {
-      throw new Error(webResult.error);
-    }
-
-    // The live ZAD site sponsors accepted submissions with its own sponsor
-    // wallet. If ZAD rejects an ONBOARD3-sponsored transaction before it
-    // reaches Stacks, retry the same origin-signed call through ZAD's native
-    // sponsorship path. The prior txid was checked above to prevent duplicates.
-    console.warn('[ZAD] ONBOARD3-sponsored transaction was not broadcast; retrying with ZAD native sponsorship.');
-    const nativeResult = await submitToZADWebAPI(
-      userKey, bountyId, summary || '', submissionUrl || null, originSignedTxHex,
-      { username: user.username || null, avatarUrl: user.profilePicture || null, bountyType, skipXVerification: true }
-    );
-    console.log('[ZAD] Native sponsorship fallback result:', nativeResult);
-    if (!nativeResult.success) {
-      const status = nativeResult.status ? ` (HTTP ${nativeResult.status})` : '';
-      const detail = nativeResult.error ? `: ${nativeResult.error}` : '';
-      throw new Error(`ZeroAuthDAO rejected both ONBOARD3 and native sponsorship${status}${detail}. Check the bounty page before retrying.`);
-    }
-    return {
-      txId: nativeResult.txId || null,
-      address: user.stacksAddress,
-      zadSubId: nativeResult.zadSubId || null,
-      accepted: Boolean(nativeResult.accepted || nativeResult.success),
-      xVerified: nativeResult.xVerified ?? webResult.xVerified ?? null,
-    };
-  }
-  const confirmedTxId = webResult.txId || txId;
-  if (!webResult.txId && !webResult.zadSubId && !webResult.accepted) {
-    throw new Error('ZeroAuthDAO returned no submission confirmation. Check its bounty page before retrying.');
+  if (!result.success) {
+    throw new Error(result.error || 'ZeroAuthDAO did not confirm the submission. Check the bounty page before retrying.');
   }
 
-  return { txId: confirmedTxId || null, address: user.stacksAddress, zadSubId: webResult.zadSubId, accepted: Boolean(webResult.accepted), xVerified: webResult.xVerified ?? null };
+  return {
+    txId:      result.txId || null,
+    address,
+    zadSubId:  result.zadSubId || null,
+    accepted:  Boolean(result.accepted),
+    xVerified: null,
+  };
 }
 
 async function getFeeWalletInfo() {
@@ -619,6 +543,51 @@ function stacksPersonalSign(privKeyHex, message) {
   return signatureVrsToRsv(signWithKey(privKeyHex + '01', hashHex));
 }
 
+// Submit bounty via ZAD's public partner API.
+// Uses challenge-based auth; ZAD sponsors the Stacks network fee.
+async function submitViaPublicAPI(address, privKeyHex, bountyId, summary, submissionUrl, signedTxHex) {
+  const zadKey    = process.env.ZAD_API_KEY || 'za_6b32ad87454525c5dff45303fea490ca6774c1b8f7c2fe4cea48f6c4d6818b1f';
+  const apiHdrs   = { 'x-api-key': zadKey, 'Content-Type': 'application/json' };
+
+  let challengeData;
+  try {
+    const res = await axios.post(
+      `${ZAD_BASE}/api/public/auth/challenge`,
+      { submitterAddress: address },
+      { headers: apiHdrs, timeout: 10000 }
+    );
+    challengeData = res.data;
+  } catch (err) {
+    const status = err.response?.status;
+    const detail = (typeof err.response?.data === 'string' ? err.response.data : JSON.stringify(err.response?.data || err.message)).slice(0, 300);
+    throw new Error(status ? `ZAD challenge request failed (HTTP ${status}): ${detail}` : err.message);
+  }
+
+  const { nonce, challenge } = challengeData;
+  if (!nonce || !challenge) throw new Error('ZAD challenge response missing nonce or challenge field');
+
+  const challengeSignature = stacksPersonalSign(privKeyHex, challenge);
+
+  try {
+    const subRes = await axios.post(
+      `${ZAD_BASE}/api/public/bounties/${bountyId}/submissions`,
+      { submitterAddress: address, signedTxHex, challengeSignature, nonce, summary: summary || '', submissionUrl: submissionUrl || null },
+      { headers: apiHdrs, timeout: 30000 }
+    );
+    const data     = subRes.data || {};
+    const zadSubId = data.submissionId || data.id || null;
+    const txId     = data.transactionId || data.txId || data.txid || null;
+    console.log('[ZAD] Public API submission OK:', JSON.stringify(data).slice(0, 300));
+    return { success: Boolean(zadSubId || txId || data.success || data.ok), zadSubId, txId, accepted: Boolean(data.success || data.ok || zadSubId || txId), xVerified: null };
+  } catch (err) {
+    const status = err.response?.status;
+    const body   = err.response?.data;
+    const detail = (typeof body === 'string' ? body : JSON.stringify(body || err.message)).slice(0, 500);
+    console.error('[ZAD] Public API submission failed:', status, detail);
+    return { success: false, zadSubId: null, txId: null, error: status ? `ZeroAuthDAO returned HTTP ${status}: ${detail}` : err.message, status };
+  }
+}
+
 // Authenticate a custodial wallet with ZeroAuthDAO using SIWS
 // Returns session cookies to use in subsequent requests
 async function authenticateWithZAD(privKey, profile = {}) {
@@ -701,116 +670,19 @@ async function tryUpdateZADProfile(cookieStr, username, avatarUrl, walletAddress
     console.warn('[ZAD] Profile update failed:', status || error.message, detail.slice(0, 200));
   }
 }
-// Submit a bounty via ZAD's Next.js Server Action — this broadcasts the tx AND creates the DB record
-// signedTxHex: hex of the origin- and ONBOARD3-sponsor-signed transaction
-// profile: { username, avatarUrl } — optional, used to update ZAD account name so it shows instead of Anonymous
+// Thin wrapper kept for the admin test route (/admin/stacks-wallets/test-zad-auth).
+// Delegates to the public partner API — signedTxHex is passed through as-is.
 async function submitToZADWebAPI(privKey, bountyId, summary, submissionUrl, signedTxHex, profile = {}) {
-  let xVerificationBypassed = false;
   try {
     if (!privKey) {
       const parent = await getParent();
       privKey = derivePrivKey(parent, 0);
     }
-    const { cookieStr, address, signinUser } = await authenticateWithZAD(privKey, profile);
-
-    // Update ZAD profile with ONBOARD3 username so submissions don't show as Anonymous
-    await tryUpdateZADProfile(cookieStr, profile.username, profile.avatarUrl, address, signinUser);
-
-    // ZAD uses a Next.js Server Action for submissions (not a REST endpoint).
-    // Build the router state for /bounty/[slug]; Next uses it to render the
-    // action response against the page that submitted the entry.
-    const bountyPath = `/bounty/${bountyId}`;
-    const routerStateTree = [
-      '',
-      { children: ['bounty', { children: [['slug', bountyId, 'd'], { children: ['__PAGE__', {}, bountyPath, 'refresh'] }] }] },
-      null,
-      null,
-      true,
-    ];
-    const headers = {
-      'Content-Type':            'text/plain;charset=UTF-8',
-      'Accept':                  'text/x-component',
-      'Cookie':                  cookieStr,
-      'Next-Action':             '0bd627de766e4d198a9751b22027e546295e1c5d',
-      'Next-Router-State-Tree':  encodeURIComponent(JSON.stringify(routerStateTree)),
-      'Next-Url':                bountyPath,
-      'Origin':                  ZAD_BASE,
-      'Referer':                 `${ZAD_BASE}${bountyPath}`,
-    };
-
-    // ONBOARD3 accepts a public X status URL without requiring users to link
-    // their X account to ZAD. ZAD receives the URL and entry, but we never
-    // claim that X ownership/activity was verified.
-    if (String(profile.bountyType || '').toLowerCase() === 'xverification') {
-      xVerificationBypassed = true;
-      console.warn('[ZAD] X account verification bypassed for ONBOARD3 submission; the entry remains unverified.');
-    }
-
-    // Match the object sent by ZeroAuthDAO's live bounty submission action.
-    const payload = [{
-      bountyId, submitterAddress: address, signedTxHex, summary, submissionUrl: submissionUrl || null, answers: null,
-    }];
-
-    const subRes = await axios.post(`${ZAD_BASE}/bounty/${bountyId}`, payload, { headers, timeout: 30000 });
-    console.log('[ZAD] Server Action status:', subRes.status);
-
-    const contentType = String(subRes.headers?.['content-type'] || '').toLowerCase();
-    if (contentType.includes('text/html')) {
-      throw new Error('ZeroAuthorityDAO returned the bounty page instead of a Server Action response; verify the action ID.');
-    }
-    const responseText = typeof subRes.data === 'string' ? subRes.data : JSON.stringify(subRes.data);
-    console.log('[ZAD] Server Action response:', responseText.slice(0, 500));
-    if (/(?:^|\n)\d+:E/.test(responseText)) {
-      throw new Error(`ZeroAuthDAO server action returned an error: ${responseText.slice(0, 500)}`);
-    }
-
-    // Parse RSC (React Server Components) streaming response
-    // Format: "0:[...]\n1:{...}\n" — look for submission id and txId in all lines
-    let zadSubId = null;
-    let txId = null;
-    let accepted = false;
-    try {
-      const responseLines = /^[\[{]/.test(responseText.trim()) ? [`0:${responseText.trim()}`] : responseText.split('\n');
-      for (const line of responseLines) {
-        const match = line.match(/^\d+:(.*)/s);
-        if (!match) continue;
-        try {
-          const parsed = JSON.parse(match[1]);
-          const queue = Array.isArray(parsed) ? [...parsed] : [parsed];
-          const seen = new Set();
-          while (queue.length) {
-            const obj = queue.shift();
-            if (!obj || typeof obj !== 'object' || seen.has(obj)) continue;
-            seen.add(obj);
-            if (obj.success === true || obj.ok === true || obj.accepted === true) accepted = true;
-            if (typeof obj.status === 'string' && obj.status.toLowerCase() === 'success') accepted = true;
-            if (obj.id && !zadSubId) zadSubId = obj.id;
-            if ((obj.txId || obj.txid || obj.transactionId) && !txId) txId = obj.txId || obj.txid || obj.transactionId;
-            for (const value of Object.values(obj)) {
-              if (value && typeof value === 'object') queue.push(value);
-              else if (typeof value === 'string' && /^[\[{]/.test(value.trim())) {
-                try { queue.push(JSON.parse(value)); } catch {}
-              }
-            }
-          }
-        } catch {}
-      }
-    } catch {}
-
-    return { success: Boolean(zadSubId || txId || accepted), accepted, zadSubId, txId, address, xVerified: xVerificationBypassed ? false : null };
+    const privKeyHex = privKey.slice(0, 64);
+    const address    = getAddressFromPrivateKey(privKey);
+    return await submitViaPublicAPI(address, privKeyHex, bountyId, summary || '', submissionUrl || null, signedTxHex);
   } catch (err) {
-    const status = err.response?.status;
-    const body   = err.response?.data;
-    const detail = (typeof body === 'string' ? body : JSON.stringify(body || err.message)).slice(0, 500);
-    console.error('[ZAD] Server Action failed:', status, detail);
-    return {
-      success: false,
-      zadSubId: null,
-      txId: null,
-      error: status ? `ZeroAuthorityDAO returned HTTP ${status}: ${detail}` : err.message,
-      status,
-      xVerified: xVerificationBypassed ? false : null,
-    };
+    return { success: false, zadSubId: null, txId: null, error: err.message };
   }
 }
 
