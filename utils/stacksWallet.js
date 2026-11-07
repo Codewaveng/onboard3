@@ -556,17 +556,18 @@ async function submitViaPublicAPI(address, privKeyHex, bountyId, summary, submis
       { submitterAddress: address },
       { headers: apiHdrs, timeout: 10000 }
     );
-    challengeData = res.data;
+    challengeData = res.data?.data || res.data;
   } catch (err) {
     const status = err.response?.status;
     const detail = (typeof err.response?.data === 'string' ? err.response.data : JSON.stringify(err.response?.data || err.message)).slice(0, 300);
     throw new Error(status ? `ZAD challenge request failed (HTTP ${status}): ${detail}` : err.message);
   }
 
-  const { nonce, challenge } = challengeData;
-  if (!nonce || !challenge) throw new Error('ZAD challenge response missing nonce or challenge field');
+  const nonce   = challengeData.nonce;
+  const message = challengeData.message || challengeData.challenge;
+  if (!nonce || !message) throw new Error('ZAD challenge response missing nonce or message field');
 
-  const challengeSignature = stacksPersonalSign(privKeyHex, challenge);
+  const challengeSignature = stacksPersonalSign(privKeyHex, message);
 
   try {
     const subRes = await axios.post(
